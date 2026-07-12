@@ -31,9 +31,12 @@ export default function Nav() {
 
   return (
     <header className="topbar">
-      <div className="brand">
-        HMIS Report Compiler
-        <small>Jinja Regional Referral Hospital</small>
+      <div className="brand" style={{ display: 'flex', alignItems: 'center', gap: '.7rem' }}>
+        <img src="/logo.png" alt="Jinja Regional Referral Hospital" style={{ height: 40, width: 40, objectFit: 'contain' }} />
+        <span>
+          HMIS Report Compiler
+          <small>Jinja Regional Referral Hospital</small>
+        </span>
       </div>
       <nav>
         {links.map((l) => (

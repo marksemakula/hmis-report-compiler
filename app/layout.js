@@ -7,6 +7,10 @@ const urbanist = Urbanist({ subsets: ['latin'], variable: '--font-urbanist' });
 export const metadata = {
   title: 'HMIS Report Compiler — Jinja Regional Referral Hospital',
   description: 'Compilation and submission of eHMIS 105 (OPD) and 108 (IPD) monthly reports to the Uganda National DHIS2.',
+  icons: {
+    icon: '/favicon.ico',
+    apple: '/logo.png',
+  },
 };
 
 export default function RootLayout({ children }) {

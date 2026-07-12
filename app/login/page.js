@@ -34,6 +34,7 @@ export default function Login() {
   return (
     <div className="login-wrap">
       <form className="login-card" onSubmit={submit}>
+        <img src="/logo.png" alt="Jinja Regional Referral Hospital" style={{ display: 'block', margin: '0 auto 1rem', height: 84, width: 84, objectFit: 'contain' }} />
         <h1>HMIS Report Compiler</h1>
         <div className="sub">Jinja Regional Referral Hospital · eHMIS 105 &amp; 108</div>
         <label>Email address</label>
