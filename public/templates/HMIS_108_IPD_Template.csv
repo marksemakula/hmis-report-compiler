@@ -1,0 +1,5 @@
+PatientNo,AdmissionDate,DischargeDate,Age,AgeUnit,Sex,Ward,DiagnosisCode,Outcome
+JRRH/IPD/0001,2026-06-02,2026-06-08,34,Years,F,Female Medical,NC09,Discharged
+JRRH/IPD/0002,2026-06-05,2026-06-06,2,Years,M,Paediatrics,ME06a,Death
+JRRH/IPD/0003,2026-06-10,,45,Years,M,Male Surgical,GN04,
+JRRH/IPD/0004,2026-06-12,2026-06-20,28,Years,F,Maternity,MC10,Discharged

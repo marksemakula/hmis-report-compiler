@@ -1,0 +1,5 @@
+PatientNo,VisitDate,Age,AgeUnit,Sex,DiagnosisCode,VisitType
+JRRH/OPD/0001,2026-06-03,24,Years,F,EP01c,New
+JRRH/OPD/0002,2026-06-03,3,Years,M,CD01,New
+JRRH/OPD/0003,2026-06-04,15,Days,F,EP01a,New
+JRRH/OPD/0004,2026-06-05,67,Years,M,MH26,Re-attendance
