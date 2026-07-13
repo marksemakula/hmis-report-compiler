@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { upload as blobUpload } from '@vercel/blob/client';
 
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
@@ -15,6 +16,7 @@ export default function Workflow() {
   const [month, setMonth] = useState(prev.getMonth() + 1);
   const [file, setFile] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState(0);
   const [error, setError] = useState('');
   const [upload, setUpload] = useState(null);
   const [compiled, setCompiled] = useState(null);
@@ -30,18 +32,39 @@ export default function Workflow() {
   const doUpload = async (e) => {
     e.preventDefault();
     if (!file) return;
-    setBusy(true); setError('');
+    if (file.size > 25 * 1024 * 1024) { setError('The file exceeds the 25 MB limit.'); return; }
+    setBusy(true); setError(''); setProgress(0);
+    let blob = null;
     try {
-      const fd = new FormData();
-      fd.append('file', file);
-      fd.append('report_type', reportType);
-      fd.append('period', period);
-      const r = await fetch('/api/py/upload', { method: 'POST', body: fd });
-      const body = await r.json();
-      if (!r.ok) throw new Error(body.detail || 'Upload failed');
+      blob = await blobUpload(`registers/${file.name}`, file, {
+        access: 'private',
+        handleUploadUrl: '/api/blob/upload',
+        contentType: file.type || 'application/octet-stream',
+        onUploadProgress: (ev) => setProgress(ev.percentage),
+      });
+      const r = await fetch('/api/py/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ blob_url: blob.url, filename: file.name, report_type: reportType, period }),
+      });
+      const text = await r.text();
+      let body;
+      try { body = JSON.parse(text); } catch {
+        throw new Error(`Upload failed (${r.status}): ${text.slice(0, 200)}`);
+      }
+      if (!r.ok) throw new Error(body.detail || body.error || 'Upload failed');
       setUpload(body);
       setStep(1);
-    } catch (err) { setError(err.message); } finally { setBusy(false); }
+    } catch (err) { setError(err.message); } finally {
+      setBusy(false);
+      if (blob) {
+        fetch('/api/blob/cleanup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: blob.url }),
+        }).catch(() => {});
+      }
+    }
   };
 
   const doCompile = async () => {
@@ -122,7 +145,7 @@ export default function Workflow() {
             <input type="file" accept=".csv,.xlsx,.xls" onChange={(e) => setFile(e.target.files[0])} required />
           </div>
           <div style={{ marginTop: 18 }}>
-            <button className="btn" disabled={busy || !file}>{busy ? 'Uploading…' : 'Upload and validate'}</button>
+            <button className="btn" disabled={busy || !file}>{busy ? (progress > 0 && progress < 100 ? 'Uploading… ' + Math.round(progress) + '%' : 'Processing…') : 'Upload and validate'}</button>
           </div>
         </form>
       )}
