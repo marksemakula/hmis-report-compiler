@@ -1,16 +1,19 @@
 """HMIS Report Compiler — FastAPI backend (deployed as a Vercel Python function)."""
 import json
 import os
+import re
 import sys
 
 sys.path.append(os.path.dirname(__file__))
 
-from fastapi import FastAPI, HTTPException, Request, Response, UploadFile, File, Form, Depends
+import requests
+
+from fastapi import FastAPI, HTTPException, Request, Response, Depends
 from pydantic import BaseModel
 
 from _lib import db
 from _lib.auth import issue_token, current_user, require_role
-from _lib.validators import parse_file, validate_rows, mapping
+from _lib.validators import parse_file, validate_rows, mapping, OPD_COLUMNS, IPD_COLUMNS
 from _lib.compiler import compile_opd, compile_ipd
 from _lib import dhis2
 
@@ -55,28 +58,45 @@ def me(user: dict = Depends(current_user)):
 
 # ---------------- uploads ----------------
 
+class UploadBody(BaseModel):
+    blob_url: str
+    filename: str
+    report_type: str
+    period: str
+
+
+BLOB_URL_RE = re.compile(r"^https://[a-z0-9]+\\.(private|public)\\.blob\\.vercel-storage\\.com/")
+
+
 @app.post("/api/py/upload")
-async def upload(
-    file: UploadFile = File(...),
-    report_type: str = Form(...),
-    period: str = Form(...),
-    user: dict = Depends(current_user),
-):
+def upload(body: UploadBody, user: dict = Depends(current_user)):
     require_role(user, "data_officer")
-    if report_type not in ("OPD", "IPD"):
+    if body.report_type not in ("OPD", "IPD"):
         err("report_type must be OPD or IPD")
-    if not (len(period) == 6 and period.isdigit() and 1 <= int(period[4:]) <= 12):
+    if not (len(body.period) == 6 and body.period.isdigit() and 1 <= int(body.period[4:]) <= 12):
         err("period must be in YYYYMM format")
-    content = await file.read()
-    if len(content) > 15 * 1024 * 1024:
-        err("The file exceeds the 15 MB limit")
+    if not BLOB_URL_RE.match(body.blob_url):
+        err("Invalid file reference")
+    token = os.environ.get("BLOB_READ_WRITE_TOKEN")
+    if not token:
+        err("File storage is not configured (BLOB_READ_WRITE_TOKEN is missing)", 500)
     try:
-        rows = parse_file(file.filename, content)
+        resp = requests.get(body.blob_url, headers={"Authorization": f"Bearer {token}"}, timeout=60)
+        resp.raise_for_status()
+    except requests.RequestException as exc:
+        err(f"Could not fetch the uploaded file from storage: {exc}", 502)
+    content = resp.content
+    if len(content) > 25 * 1024 * 1024:
+        err("The file exceeds the 25 MB limit")
+    expected = OPD_COLUMNS if body.report_type == "OPD" else IPD_COLUMNS
+    try:
+        rows = parse_file(body.filename, content, expected_columns=expected)
     except Exception as exc:
         err(f"The file could not be parsed: {exc}")
     if not rows:
-        err("The file contains no data rows")
-    clean, errors = validate_rows(report_type, rows, period)
+        err("No data rows were found. Check that the register was exported into the "
+            "correct sheet using the published template headers.")
+    clean, errors = validate_rows(body.report_type, rows, body.period)
     in_period = sum(1 for r in clean if r["in_period"])
 
     with db.get_conn() as conn:
@@ -85,14 +105,14 @@ async def upload(
                 """INSERT INTO imported_data
                    (file_name, report_type, period, row_count, error_count, original_data, validation_errors, uploaded_by, processing_status)
                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
-                (file.filename, report_type, period, len(rows), len(errors),
+                (body.filename, body.report_type, body.period, len(rows), len(errors),
                  json.dumps(clean), json.dumps(errors), user["sub"],
                  "PENDING" if not errors else "PENDING"),
             )
             import_id = cur.fetchone()["id"]
     db.audit(user["sub"], "File uploaded", {
-        "import_id": import_id, "file": file.filename, "type": report_type,
-        "period": period, "rows": len(rows), "errors": len(errors),
+        "import_id": import_id, "file": body.filename, "type": body.report_type,
+        "period": body.period, "rows": len(rows), "errors": len(errors),
     })
     return {
         "import_id": import_id,
