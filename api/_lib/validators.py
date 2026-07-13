@@ -123,20 +123,47 @@ def age_in_years(age, unit):
     return age
 
 
-def parse_file(filename: str, content: bytes):
-    """Return list of row dicts from CSV or Excel content."""
+def _row_is_blank(values) -> bool:
+    return all(v is None or str(v).strip() == "" for v in values)
+
+
+def _pick_sheet(wb, expected_columns):
+    """Choose the worksheet whose header row best matches the expected columns.
+
+    Guards against workbooks where the active sheet is empty or unrelated
+    (e.g. an export whose first sheet holds only formatting).
+    """
+    best, best_hits = None, 0
+    for ws in wb.worksheets:
+        first = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
+        if not first:
+            continue
+        header = {str(c).strip() for c in first if c is not None}
+        hits = len(header & set(expected_columns))
+        if hits > best_hits:
+            best, best_hits = ws, hits
+    return best if best is not None and best_hits >= 3 else None
+
+
+def parse_file(filename: str, content: bytes, expected_columns=None):
+    """Return list of row dicts from CSV or Excel content.
+
+    Blank rows (all cells empty) are skipped: Excel files often carry
+    thousands of formatted-but-empty ghost rows after data is deleted,
+    which would otherwise all fail validation.
+    """
     if filename.lower().endswith((".xlsx", ".xls", ".xlsm")):
         from openpyxl import load_workbook
         wb = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
-        ws = wb.active
-        rows = list(ws.iter_rows(values_only=True))
+        ws = (_pick_sheet(wb, expected_columns) if expected_columns else None) or wb.active
+        rows = [r for r in ws.iter_rows(values_only=True) if not _row_is_blank(r)]
         if not rows:
             return []
         header = [str(c).strip() if c is not None else "" for c in rows[0]]
         return [dict(zip(header, [("" if c is None else str(c)) for c in r])) for r in rows[1:]]
     text = content.decode("utf-8-sig", errors="replace")
     reader = csv.DictReader(io.StringIO(text))
-    return [dict(r) for r in reader]
+    return [dict(r) for r in reader if not _row_is_blank(r.values())]
 
 
 def validate_rows(report_type: str, rows: list, period: str):
