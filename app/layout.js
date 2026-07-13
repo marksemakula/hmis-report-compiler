@@ -1,8 +1,8 @@
 import './globals.css';
-import { Urbanist } from 'next/font/google';
+import { Ubuntu } from 'next/font/google';
 import Nav from './nav';
 
-const urbanist = Urbanist({ subsets: ['latin'], variable: '--font-urbanist' });
+const ubuntu = Ubuntu({ subsets: ['latin'], weight: ['300', '400', '500', '700'], variable: '--font-ubuntu' });
 
 export const metadata = {
   title: 'HMIS Report Compiler — Jinja Regional Referral Hospital',
@@ -15,7 +15,7 @@ export const metadata = {
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="en-GB" className={urbanist.variable}>
+    <html lang="en-GB" className={ubuntu.variable}>
       <body>
         <div className="shell">
           <Nav />
