@@ -5,6 +5,7 @@ import re
 from datetime import datetime, date
 
 from .metadata import mapping
+from .diagnosis_map import map_diagnosis
 
 
 _IPD_INDEX = None
@@ -195,7 +196,10 @@ def validate_rows(report_type: str, rows: list, period: str):
         if years is not None and not (0 <= years <= 130):
             problems.append(f"Age {years:.1f} years is outside the acceptable range")
 
-        code = row.get("DiagnosisCode", "").strip()
+        raw_code = row.get("DiagnosisCode", "").strip()
+        # Translate EMR free-text diagnosis names into HMIS 105 codes.
+        # Already-valid codes pass through unchanged.
+        code = map_diagnosis(raw_code, code_index) if (report_type == "OPD" and raw_code) else raw_code
         code_norm = re.sub(r"\s+", "", code)
         if code and report_type == "OPD" and code_norm not in code_index:
             problems.append(f"Diagnosis code '{code}' does not match any HMIS 105 data element")
