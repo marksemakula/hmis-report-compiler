@@ -146,6 +146,72 @@ def _pick_sheet(wb, expected_columns):
     return best if best is not None and best_hits >= 3 else None
 
 
+# --- Raw EMR export adapter -------------------------------------------------
+# Jinja RRH's EMR exports one row per billed item (drug/test/service), so a
+# single OPD visit spans many rows and uses different column names than the
+# HMIS template. When those signature columns are present we collapse the
+# export to one row per Visit No and rename columns to the template schema.
+# The published clean template lacks these columns, so it passes through
+# untouched.
+_RAW_EMR_MARKERS = {"Visit No", "All Diagnosis", "Visit Category"}
+_EMR_SEX = {"Female": "F", "Male": "M", "F": "F", "M": "M"}
+_EMR_VISIT_TYPE = {
+    "Consultation": "New", "Self Request": "New", "Refferal": "New", "Referral": "New",
+    "Follow up": "Re-attendance", "RTT - Return To Treatment": "Re-attendance",
+    "Represented": "Re-attendance", "CDDP": "Re-attendance",
+}
+
+
+def _emr_clean_patient_no(value):
+    text = str(value or "").strip()
+    return text[:-2] if text.endswith(".0") else text
+
+
+def _emr_format_date(value):
+    if hasattr(value, "strftime"):
+        return value.strftime("%Y-%m-%d")
+    return str(value or "")[:10]
+
+
+def _is_raw_emr(fieldnames):
+    return _RAW_EMR_MARKERS.issubset({str(f).strip() for f in fieldnames if f})
+
+
+def _collapse_emr_visits(dict_rows):
+    """Collapse raw EMR billing lines into one row per Visit No.
+
+    First non-empty diagnosis for a visit wins (one row per visit, per the
+    facility's reporting choice). Columns are renamed to the OPD template.
+    """
+    visits, order = {}, []
+    for row in dict_rows:
+        vno = str(row.get("Visit No") or "").strip()
+        key = vno if vno else "__row_%d" % len(order)
+        diagnosis = str(row.get("All Diagnosis") or "").strip()
+        if key not in visits:
+            age = row.get("Age")
+            try:
+                age = str(int(float(age))) if str(age).strip() not in ("", "None") else ""
+            except (TypeError, ValueError):
+                age = str(age or "")
+            gender = str(row.get("Gender") or "").strip()
+            category = str(row.get("Visit Category") or "").strip()
+            visits[key] = {
+                "PatientNo": _emr_clean_patient_no(row.get("Patient No")),
+                "Age": age,
+                "AgeUnit": "Years",
+                "Sex": _EMR_SEX.get(gender, gender),
+                "DiagnosisCode": diagnosis,
+                "VisitDate": _emr_format_date(row.get("Visit Date")),
+                "VisitType": _EMR_VISIT_TYPE.get(category, "New"),
+            }
+            order.append(key)
+        elif not visits[key]["DiagnosisCode"] and diagnosis:
+            visits[key]["DiagnosisCode"] = diagnosis
+    return [visits[k] for k in order]
+
+
+
 def parse_file(filename: str, content: bytes, expected_columns=None):
     """Return list of row dicts from CSV or Excel content.
 
@@ -161,10 +227,16 @@ def parse_file(filename: str, content: bytes, expected_columns=None):
         if not rows:
             return []
         header = [str(c).strip() if c is not None else "" for c in rows[0]]
-        return [dict(zip(header, [("" if c is None else str(c)) for c in r])) for r in rows[1:]]
+        dict_rows = [dict(zip(header, [("" if c is None else str(c)) for c in r])) for r in rows[1:]]
+        if _is_raw_emr(header):
+            return _collapse_emr_visits(dict_rows)
+        return dict_rows
     text = content.decode("utf-8-sig", errors="replace")
     reader = csv.DictReader(io.StringIO(text))
-    return [dict(r) for r in reader if not _row_is_blank(r.values())]
+    dict_rows = [dict(r) for r in reader if not _row_is_blank(r.values())]
+    if reader.fieldnames and _is_raw_emr(reader.fieldnames):
+        return _collapse_emr_visits(dict_rows)
+    return dict_rows
 
 
 def validate_rows(report_type: str, rows: list, period: str):
