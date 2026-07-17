@@ -111,8 +111,12 @@ def resolve_attribute_option_combo(ds_id: str, session=None):
     options = cc.get("categoryOptionCombos", [])
     wanted = os.environ.get("DHIS2_AOC", "").strip()
     if wanted:
+        def _norm(name):
+            # tolerate numbering prefixes such as '1. National'
+            import re
+            return re.sub(r"^\s*\d+\s*[.)-]?\s*", "", name).strip().lower()
         for o in options:
-            if o["id"] == wanted or o["name"].strip().lower() == wanted.lower():
+            if o["id"] == wanted or _norm(o["name"]) == _norm(wanted):
                 return o["id"]
         raise RuntimeError(
             f"DHIS2_AOC is set to '{wanted}' but the data set's '{cc.get('name')}' combo offers: "
