@@ -37,6 +37,54 @@ def test_connection():
     return r.json()
 
 
+def preflight(report_type: str = "OPD", org_unit: str = None):
+    """Diagnose why a submission might be silently ignored: checks identity,
+    data set assignment to the org unit, data write access, capture scope and expiry rules."""
+    m = mapping()
+    ds_key = "HMIS105_01" if report_type == "OPD" else "HMIS108"
+    ds_id = m["dataSets"][ds_key]["id"]
+    ou_id = org_unit or m["orgUnit"]["id"]
+    s = _session()
+    b = base_url()
+    checks = {}
+
+    # 1. Who does DHIS2 think we are, and which org units can we capture data for?
+    me = s.get(f"{b}/api/me.json?fields=id,username,authorities,organisationUnits[id,name,level]", timeout=30)
+    me.raise_for_status()
+    me = me.json()
+    capture_ous = me.get("organisationUnits", [])
+    checks["identity"] = {"username": me.get("username"), "captureOrgUnits": capture_ous}
+    auths = set(me.get("authorities", []))
+    checks["canAddDataValues"] = "ALL" in auths or "F_DATAVALUE_ADD" in auths
+
+    # 2. Is the data set assigned to this org unit? (filtered query — cheap even on a national instance)
+    r = s.get(f"{b}/api/dataSets.json?filter=id:eq:{ds_id}&filter=organisationUnits.id:eq:{ou_id}&fields=id", timeout=30)
+    r.raise_for_status()
+    checks["dataSetAssignedToOrgUnit"] = len(r.json().get("dataSets", [])) > 0
+
+    # 3. Does this account have data WRITE sharing on the data set (distinct from metadata access)?
+    r = s.get(f"{b}/api/dataSets/{ds_id}.json?fields=id,name,periodType,expiryDays,openFuturePeriods,"
+              f"access[data[read,write]],categoryCombo[id,name,isDefault]", timeout=30)
+    r.raise_for_status()
+    ds = r.json()
+    checks["dataSet"] = {"name": ds.get("name"), "periodType": ds.get("periodType"),
+                         "expiryDays": ds.get("expiryDays"), "openFuturePeriods": ds.get("openFuturePeriods"),
+                         "attributeCategoryCombo": ds.get("categoryCombo")}
+    checks["dataWriteAccess"] = bool(ds.get("access", {}).get("data", {}).get("write"))
+
+    # 4. Is the target org unit inside the account's capture hierarchy?
+    r = s.get(f"{b}/api/organisationUnits/{ou_id}.json?fields=id,name,path", timeout=30)
+    r.raise_for_status()
+    ou = r.json()
+    path_ids = set(ou.get("path", "").strip("/").split("/"))
+    checks["orgUnit"] = {"id": ou.get("id"), "name": ou.get("name")}
+    checks["orgUnitInCaptureScope"] = any(c["id"] in path_ids or c["id"] == ou_id for c in capture_ous)
+
+    checks["ok"] = all([checks["canAddDataValues"], checks["dataSetAssignedToOrgUnit"],
+                        checks["dataWriteAccess"], checks["orgUnitInCaptureScope"]])
+    return checks
+
+
 def build_payload(report_type: str, period: str, data_values: list, org_unit: str = None):
     m = mapping()
     ds = m["dataSets"]["HMIS105_01" if report_type == "OPD" else "HMIS108"]

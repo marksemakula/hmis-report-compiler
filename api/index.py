@@ -261,6 +261,19 @@ def dhis2_test(user: dict = Depends(current_user)):
         err(f"Could not reach DHIS2: {exc}", 502)
 
 
+@app.get("/api/py/dhis2/preflight")
+def dhis2_preflight(report_type: str = "OPD", user: dict = Depends(current_user)):
+    """Checks every condition DHIS2 requires before it will accept data values,
+    to explain submissions that return SUCCESS yet ignore all values."""
+    require_role(user, "data_officer")
+    try:
+        return dhis2.preflight(report_type)
+    except RuntimeError as exc:
+        err(str(exc), 503)
+    except Exception as exc:
+        err(f"Preflight failed: {exc}", 502)
+
+
 # ---------------- audit ----------------
 
 @app.get("/api/py/audit")
