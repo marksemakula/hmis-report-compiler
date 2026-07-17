@@ -64,13 +64,21 @@ def preflight(report_type: str = "OPD", org_unit: str = None):
 
     # 3. Does this account have data WRITE sharing on the data set (distinct from metadata access)?
     r = s.get(f"{b}/api/dataSets/{ds_id}.json?fields=id,name,periodType,expiryDays,openFuturePeriods,"
-              f"access[data[read,write]],categoryCombo[id,name,isDefault]", timeout=30)
+              f"access[data[read,write]],categoryCombo[id,name,isDefault,categoryOptionCombos[id,name]]", timeout=30)
     r.raise_for_status()
     ds = r.json()
+    cc = ds.get("categoryCombo", {})
     checks["dataSet"] = {"name": ds.get("name"), "periodType": ds.get("periodType"),
                          "expiryDays": ds.get("expiryDays"), "openFuturePeriods": ds.get("openFuturePeriods"),
-                         "attributeCategoryCombo": ds.get("categoryCombo")}
+                         "attributeCategoryCombo": {k: cc.get(k) for k in ("id", "name", "isDefault")}}
     checks["dataWriteAccess"] = bool(ds.get("access", {}).get("data", {}).get("write"))
+    if not cc.get("isDefault", True):
+        checks["attributeOptionCombos"] = cc.get("categoryOptionCombos", [])
+        try:
+            checks["attributeOptionComboSelected"] = resolve_attribute_option_combo(ds_id, session=s)
+        except RuntimeError as exc:
+            checks["attributeOptionComboSelected"] = None
+            checks["attributeOptionComboError"] = str(exc)
 
     # 4. Is the target org unit inside the account's capture hierarchy?
     r = s.get(f"{b}/api/organisationUnits/{ou_id}.json?fields=id,name,path", timeout=30)
@@ -85,10 +93,42 @@ def preflight(report_type: str = "OPD", org_unit: str = None):
     return checks
 
 
+def resolve_attribute_option_combo(ds_id: str, session=None):
+    """The Uganda HMIS data sets are attributed by a non-default category combo
+    ('Nationality'). Values submitted without an attributeOptionCombo are filed
+    under the default combo and silently ignored, so we must resolve the right one.
+
+    Selection order: DHIS2_AOC env var (UID or name, e.g. 'National'), otherwise
+    the sole option if only one exists, otherwise raise listing the choices."""
+    s = session or _session()
+    b = base_url()
+    r = s.get(f"{b}/api/dataSets/{ds_id}.json?fields=categoryCombo[id,name,isDefault,"
+              f"categoryOptionCombos[id,name]]", timeout=30)
+    r.raise_for_status()
+    cc = r.json().get("categoryCombo", {})
+    if cc.get("isDefault", True):
+        return None  # default combo — DHIS2 handles it implicitly
+    options = cc.get("categoryOptionCombos", [])
+    wanted = os.environ.get("DHIS2_AOC", "").strip()
+    if wanted:
+        for o in options:
+            if o["id"] == wanted or o["name"].strip().lower() == wanted.lower():
+                return o["id"]
+        raise RuntimeError(
+            f"DHIS2_AOC is set to '{wanted}' but the data set's '{cc.get('name')}' combo offers: "
+            + ", ".join(f"{o['name']} ({o['id']})" for o in options))
+    if len(options) == 1:
+        return options[0]["id"]
+    raise RuntimeError(
+        f"This data set is attributed by '{cc.get('name')}' and DHIS2 needs to know which option "
+        f"this report belongs to. Set the DHIS2_AOC environment variable in Vercel to one of: "
+        + ", ".join(f"{o['name']} ({o['id']})" for o in options))
+
+
 def build_payload(report_type: str, period: str, data_values: list, org_unit: str = None):
     m = mapping()
     ds = m["dataSets"]["HMIS105_01" if report_type == "OPD" else "HMIS108"]
-    return {
+    payload = {
         "dataSet": ds["id"],
         "completeDate": date.today().isoformat(),
         "period": period,
@@ -102,6 +142,10 @@ def build_payload(report_type: str, period: str, data_values: list, org_unit: st
             for v in data_values
         ],
     }
+    aoc = resolve_attribute_option_combo(ds["id"])
+    if aoc:
+        payload["attributeOptionCombo"] = aoc
+    return payload
 
 
 def submit(payload: dict, max_retries: int = 3):
