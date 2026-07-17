@@ -195,7 +195,7 @@ def push(body: PushBody, user: dict = Depends(current_user)):
         result = dhis2.submit(payload)
     except RuntimeError as exc:
         err(str(exc), 503)
-    status = "PUSHED" if result.get("status") in ("SUCCESS", "OK", "WARNING") else "FAILED"
+    status = "PUSHED" if result.get("accepted") else "FAILED"
     with db.get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("UPDATE reports SET push_status=%s, push_response=%s WHERE id=%s",

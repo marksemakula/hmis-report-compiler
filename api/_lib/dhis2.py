@@ -72,12 +72,28 @@ def submit(payload: dict, max_retries: int = 3):
             if r.status_code in (200, 201, 409):
                 # 409 returns import summary with conflicts — surface it rather than retry
                 summary = body.get("response", body)
+                counts = summary.get("importCount", {})
+                imported = int(counts.get("imported", 0) or 0)
+                updated = int(counts.get("updated", 0) or 0)
+                ignored = int(counts.get("ignored", 0) or 0)
+                conflicts = summary.get("conflicts", [])[:50]
+                # DHIS2 reports status SUCCESS even when every value is ignored,
+                # so success must be judged on the import counts, not the status flag.
+                accepted = summary.get("status") in ("SUCCESS", "OK", "WARNING") and (imported + updated) > 0
+                description = summary.get("description", "")
+                if not accepted and ignored > 0:
+                    reasons = "; ".join(f"{c.get('object', '?')}: {c.get('value', '?')}" for c in conflicts[:5])
+                    description = (
+                        f"DHIS2 accepted the request but ignored all {ignored} value(s) — nothing was written. "
+                        f"{('Conflicts: ' + reasons) if reasons else 'No conflict details returned; check that the data set is assigned to the org unit, the period is open, and your user has data capture rights for it.'}"
+                    )
                 return {
                     "httpStatus": r.status_code,
                     "status": summary.get("status", "UNKNOWN"),
-                    "importCount": summary.get("importCount", {}),
-                    "conflicts": summary.get("conflicts", [])[:50],
-                    "description": summary.get("description", ""),
+                    "accepted": accepted,
+                    "importCount": counts,
+                    "conflicts": conflicts,
+                    "description": description,
                 }
             if r.status_code in (401, 403):
                 return {"httpStatus": r.status_code, "status": "ERROR",
