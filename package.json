@@ -9,7 +9,9 @@
     "fastapi-dev": "uvicorn api.index:app --reload --port 8000"
   },
   "dependencies": {
-    "next": "14.2.15",
+    "@vercel/blob": "^2.6.1",
+    "jose": "^6.2.3",
+    "next": "^16.2.10",
     "react": "18.3.1",
     "react-dom": "18.3.1"
   }

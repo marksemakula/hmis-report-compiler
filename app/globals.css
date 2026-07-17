@@ -18,7 +18,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--ink);
-  font-family: var(--font-urbanist), 'Gill Sans MT', 'Gill Sans', 'Segoe UI', sans-serif;
+  font-family: var(--font-ubuntu), 'Ubuntu', 'Segoe UI', sans-serif;
   font-size: 15px;
   line-height: 1.55;
 }

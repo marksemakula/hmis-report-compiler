@@ -5,3 +5,9 @@ __pycache__/
 .env
 .env.local
 .vercel/
+
+# Register extracts contain patient data - never commit them
+public/*.xlsx
+public/*.xls
+*.xlsx
+!public/templates/*

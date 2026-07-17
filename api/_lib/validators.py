@@ -5,6 +5,7 @@ import re
 from datetime import datetime, date
 
 from .metadata import mapping
+from .diagnosis_map import map_diagnosis
 
 
 _IPD_INDEX = None
@@ -123,20 +124,119 @@ def age_in_years(age, unit):
     return age
 
 
-def parse_file(filename: str, content: bytes):
-    """Return list of row dicts from CSV or Excel content."""
+def _row_is_blank(values) -> bool:
+    return all(v is None or str(v).strip() == "" for v in values)
+
+
+def _pick_sheet(wb, expected_columns):
+    """Choose the worksheet whose header row best matches the expected columns.
+
+    Guards against workbooks where the active sheet is empty or unrelated
+    (e.g. an export whose first sheet holds only formatting).
+    """
+    best, best_hits = None, 0
+    for ws in wb.worksheets:
+        first = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
+        if not first:
+            continue
+        header = {str(c).strip() for c in first if c is not None}
+        hits = len(header & set(expected_columns))
+        if hits > best_hits:
+            best, best_hits = ws, hits
+    return best if best is not None and best_hits >= 3 else None
+
+
+# --- Raw EMR export adapter -------------------------------------------------
+# Jinja RRH's EMR exports one row per billed item (drug/test/service), so a
+# single OPD visit spans many rows and uses different column names than the
+# HMIS template. When those signature columns are present we collapse the
+# export to one row per Visit No and rename columns to the template schema.
+# The published clean template lacks these columns, so it passes through
+# untouched.
+_RAW_EMR_MARKERS = {"Visit No", "All Diagnosis", "Visit Category"}
+_EMR_SEX = {"Female": "F", "Male": "M", "F": "F", "M": "M"}
+_EMR_VISIT_TYPE = {
+    "Consultation": "New", "Self Request": "New", "Refferal": "New", "Referral": "New",
+    "Follow up": "Re-attendance", "RTT - Return To Treatment": "Re-attendance",
+    "Represented": "Re-attendance", "CDDP": "Re-attendance",
+}
+
+
+def _emr_clean_patient_no(value):
+    text = str(value or "").strip()
+    return text[:-2] if text.endswith(".0") else text
+
+
+def _emr_format_date(value):
+    if hasattr(value, "strftime"):
+        return value.strftime("%Y-%m-%d")
+    return str(value or "")[:10]
+
+
+def _is_raw_emr(fieldnames):
+    return _RAW_EMR_MARKERS.issubset({str(f).strip() for f in fieldnames if f})
+
+
+def _collapse_emr_visits(dict_rows):
+    """Collapse raw EMR billing lines into one row per Visit No.
+
+    First non-empty diagnosis for a visit wins (one row per visit, per the
+    facility's reporting choice). Columns are renamed to the OPD template.
+    """
+    visits, order = {}, []
+    for row in dict_rows:
+        vno = str(row.get("Visit No") or "").strip()
+        key = vno if vno else "__row_%d" % len(order)
+        diagnosis = str(row.get("All Diagnosis") or "").strip()
+        if key not in visits:
+            age = row.get("Age")
+            try:
+                age = str(int(float(age))) if str(age).strip() not in ("", "None") else ""
+            except (TypeError, ValueError):
+                age = str(age or "")
+            gender = str(row.get("Gender") or "").strip()
+            category = str(row.get("Visit Category") or "").strip()
+            visits[key] = {
+                "PatientNo": _emr_clean_patient_no(row.get("Patient No")),
+                "Age": age,
+                "AgeUnit": "Years",
+                "Sex": _EMR_SEX.get(gender, gender),
+                "DiagnosisCode": diagnosis,
+                "VisitDate": _emr_format_date(row.get("Visit Date")),
+                "VisitType": _EMR_VISIT_TYPE.get(category, "New"),
+            }
+            order.append(key)
+        elif not visits[key]["DiagnosisCode"] and diagnosis:
+            visits[key]["DiagnosisCode"] = diagnosis
+    return [visits[k] for k in order]
+
+
+
+def parse_file(filename: str, content: bytes, expected_columns=None):
+    """Return list of row dicts from CSV or Excel content.
+
+    Blank rows (all cells empty) are skipped: Excel files often carry
+    thousands of formatted-but-empty ghost rows after data is deleted,
+    which would otherwise all fail validation.
+    """
     if filename.lower().endswith((".xlsx", ".xls", ".xlsm")):
         from openpyxl import load_workbook
         wb = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
-        ws = wb.active
-        rows = list(ws.iter_rows(values_only=True))
+        ws = (_pick_sheet(wb, expected_columns) if expected_columns else None) or wb.active
+        rows = [r for r in ws.iter_rows(values_only=True) if not _row_is_blank(r)]
         if not rows:
             return []
         header = [str(c).strip() if c is not None else "" for c in rows[0]]
-        return [dict(zip(header, [("" if c is None else str(c)) for c in r])) for r in rows[1:]]
+        dict_rows = [dict(zip(header, [("" if c is None else str(c)) for c in r])) for r in rows[1:]]
+        if _is_raw_emr(header):
+            return _collapse_emr_visits(dict_rows)
+        return dict_rows
     text = content.decode("utf-8-sig", errors="replace")
     reader = csv.DictReader(io.StringIO(text))
-    return [dict(r) for r in reader]
+    dict_rows = [dict(r) for r in reader if not _row_is_blank(r.values())]
+    if reader.fieldnames and _is_raw_emr(reader.fieldnames):
+        return _collapse_emr_visits(dict_rows)
+    return dict_rows
 
 
 def validate_rows(report_type: str, rows: list, period: str):
@@ -168,7 +268,10 @@ def validate_rows(report_type: str, rows: list, period: str):
         if years is not None and not (0 <= years <= 130):
             problems.append(f"Age {years:.1f} years is outside the acceptable range")
 
-        code = row.get("DiagnosisCode", "").strip()
+        raw_code = row.get("DiagnosisCode", "").strip()
+        # Translate EMR free-text diagnosis names into HMIS 105 codes.
+        # Already-valid codes pass through unchanged.
+        code = map_diagnosis(raw_code, code_index) if (report_type == "OPD" and raw_code) else raw_code
         code_norm = re.sub(r"\s+", "", code)
         if code and report_type == "OPD" and code_norm not in code_index:
             problems.append(f"Diagnosis code '{code}' does not match any HMIS 105 data element")
