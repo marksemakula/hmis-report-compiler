@@ -22,11 +22,13 @@ export default function Nav() {
     router.push('/login');
   };
 
+  // Preview is open to every role, including Viewer, who cannot compile or submit.
   const links = [
-    { href: '/', label: 'Compile' },
+    { href: '/preview', label: 'Preview' },
     { href: '/reports', label: 'Reports' },
     { href: '/audit', label: 'Audit Trail' },
   ];
+  if (user?.role !== 'viewer') links.unshift({ href: '/', label: 'Compile' });
   if (user?.role === 'admin') links.push({ href: '/admin', label: 'Administration' });
 
   return (

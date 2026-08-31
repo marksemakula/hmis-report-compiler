@@ -16,13 +16,35 @@ CONSTANTS = {
         "HMIS105_01": {"id": "RtEYsASU7PG", "name": "HMIS 105:01 - OPD Monthly Report (Attendance, Referrals, Conditions, TB, Nutrition)", "periodType": "Monthly"},
         "HMIS108": {"id": "EBqVAQRmiPm", "name": "HMIS 108 - IPD Monthly Report", "periodType": "Monthly"},
         "HMIS033B": {"id": "C4oUitImBPK", "name": "HMIS 033b - Weekly Epidemiological Surveillance Report", "periodType": "Weekly"},
+        # Registered for preview and submission targeting. Compilers for these
+        # follow in a later phase; until then their tabs render the blank form.
+        "HMIS105_0203": {"id": "ic1BSWhGOso", "name": "HMIS 105:02-03 - OPD Monthly Report (MCH, FP, EID, EPI & HEPB)", "periodType": "Monthly"},
+        "HMIS105_0405": {"id": "nGkMm2VBT4G", "name": "HMIS 105:04-05 - OPD Monthly Report (HTS & SMC)", "periodType": "Monthly"},
+        "HMIS105C": {"id": "V6TqjXm5sQy", "name": "HMIS 105C- Palliative Care Monthly Report", "periodType": "Monthly"},
+        "HMIS106A_0102": {"id": "dFRD2A5fdvn", "name": "HMIS 106a:01-02 - HIV Quarterly Report", "periodType": "Quarterly"},
+        "HMIS106A_03": {"id": "DFMoIONIalm", "name": "HMIS 106a:03 - TB/Leprosy Quarterly Report", "periodType": "Quarterly"},
     },
-    # Report type -> data set key. Kept here so period rules, payload building
-    # and preflight all resolve the data set the same way.
+    # Report type -> data set key. Kept here so period rules, payload building,
+    # preflight and the preview tabs all resolve the data set the same way.
+    # `compiler` says whether this session can turn an upload into data values;
+    # a report without one is previewable but not yet compilable.
     "reportTypes": {
-        "OPD": {"dataSet": "HMIS105_01", "periodType": "Monthly", "label": "eHMIS 105:01 — Outpatient"},
-        "IPD": {"dataSet": "HMIS108", "periodType": "Monthly", "label": "eHMIS 108 — Inpatient"},
-        "SURV": {"dataSet": "HMIS033B", "periodType": "Weekly", "label": "eHMIS 033B — Weekly Surveillance"},
+        "OPD":  {"dataSet": "HMIS105_01",    "periodType": "Monthly",   "compiler": True,
+                 "label": "eHMIS 105:01 — OPD (Attendance, Referrals, Conditions, TB, Nutrition)", "short": "105:01"},
+        "MCH":  {"dataSet": "HMIS105_0203",  "periodType": "Monthly",   "compiler": False,
+                 "label": "eHMIS 105:02-03 — OPD (MCH, FP, EID, EPI & HEPB)", "short": "105:02-03"},
+        "HTS":  {"dataSet": "HMIS105_0405",  "periodType": "Monthly",   "compiler": False,
+                 "label": "eHMIS 105:04-05 — OPD (HTS & SMC)", "short": "105:04-05"},
+        "PALL": {"dataSet": "HMIS105C",      "periodType": "Monthly",   "compiler": False,
+                 "label": "eHMIS 105C — Palliative Care", "short": "105C"},
+        "IPD":  {"dataSet": "HMIS108",       "periodType": "Monthly",   "compiler": True,
+                 "label": "eHMIS 108 — Inpatient", "short": "108"},
+        "SURV": {"dataSet": "HMIS033B",      "periodType": "Weekly",    "compiler": True,
+                 "label": "eHMIS 033B — Weekly Epidemiological Surveillance", "short": "033B"},
+        "HIV":  {"dataSet": "HMIS106A_0102", "periodType": "Quarterly", "compiler": False,
+                 "label": "eHMIS 106a:01-02 — HIV Quarterly", "short": "106a:01-02"},
+        "TBL":  {"dataSet": "HMIS106A_03",   "periodType": "Quarterly", "compiler": False,
+                 "label": "eHMIS 106a:03 — TB/Leprosy Quarterly", "short": "106a:03"},
     },
     "keyDataElements": {
         "OA01_newAttendance": "sv6SeKroHPV",
@@ -119,7 +141,12 @@ def _fetch_data_elements(only=None):
             # both '033B-' and '033b-' appear, and a few omit the full stop
             # after the code ('033B-CD23e_2019 Other Cases 2'). The character
             # class accepts a stop or the whitespace that follows the code.
-            m = re.match(r"^(105|108|033[Bb])-([A-Za-z0-9_]+)[\.\s]\s*(.*)$", de["name"])
+            # Prefixes seen across the eight data sets: 105-, 105C-, 106a-,
+            # 108-, 033B- and 033b-. The character class after the code accepts
+            # either a full stop or the whitespace that follows it, because a
+            # few elements omit the stop entirely.
+            m = re.match(r"^(105[A-Ca-c]?|106[Aa]|108|033[Bb])-([A-Za-z0-9_]+)[\.\s]\s*(.*)$",
+                         de["name"])
             des[de["id"]] = {
                 "name": de["name"],
                 "code": m.group(2) if m else None,

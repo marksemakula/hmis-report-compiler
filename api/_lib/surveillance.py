@@ -16,15 +16,19 @@ Code suffix convention used by the national instance:
 Summary-section codes (AP, MA, TB, TR, RV, GP, TP) carry no suffix.
 """
 import re
-from datetime import date, timedelta
 
 from .metadata import mapping
+# Period arithmetic lives in periods.py, which serves all three cadences.
+# Re-exported here so existing callers and tests keep working unchanged.
+from .periods import (  # noqa: F401
+    WEEK_RE as WEEK_PERIOD_RE,
+    describe_week,
+    parse_week_period,
+    week_bounds,
+    week_period,
+)
 
 SURV_COLUMNS = ["Code", "Value"]
-
-# DHIS2 weekly periods are ISO-8601: weeks start on Monday and week 1 is the
-# week containing 4 January. The identifier is not zero-padded (2026W7).
-WEEK_PERIOD_RE = re.compile(r"^(\d{4})W(\d{1,2})$", re.IGNORECASE)
 
 _SURV_INDEX = None
 
@@ -52,44 +56,6 @@ def surveillance_index() -> dict:
 def reset_index():
     global _SURV_INDEX
     _SURV_INDEX = None
-
-
-def week_period(d: date) -> str:
-    """DHIS2 weekly period identifier for the week containing `d`."""
-    iso_year, iso_week, _ = d.isocalendar()
-    return f"{iso_year}W{iso_week}"
-
-
-def parse_week_period(period: str):
-    """('2026W34') -> (2026, 34), or None when the identifier is malformed."""
-    m = WEEK_PERIOD_RE.match(str(period).strip())
-    if not m:
-        return None
-    year, week = int(m.group(1)), int(m.group(2))
-    if not (1 <= week <= 53):
-        return None
-    # Reject week 53 in years that only have 52 ISO weeks.
-    if week == 53 and date(year, 12, 28).isocalendar()[1] != 53:
-        return None
-    return year, week
-
-
-def week_bounds(period: str):
-    """(Monday, Sunday) dates covered by a DHIS2 weekly period."""
-    parsed = parse_week_period(period)
-    if not parsed:
-        return None
-    year, week = parsed
-    monday = date.fromisocalendar(year, week, 1)
-    return monday, monday + timedelta(days=6)
-
-
-def describe_week(period: str) -> str:
-    b = week_bounds(period)
-    if not b:
-        return period
-    start, end = b
-    return f"{period} ({start.strftime('%d %b')} – {end.strftime('%d %b %Y')})"
 
 
 def _clean_value(raw):
