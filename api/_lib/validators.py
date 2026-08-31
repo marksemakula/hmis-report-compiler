@@ -178,10 +178,16 @@ def _is_raw_emr(fieldnames):
 
 
 def _collapse_emr_visits(dict_rows):
-    """Collapse raw EMR billing lines into one row per Visit No.
+    """Reshape raw EMR billing lines into one row per DIAGNOSIS.
 
-    First non-empty diagnosis for a visit wins (one row per visit, per the
-    facility's reporting choice). Columns are renamed to the OPD template.
+    The facility records more than one diagnosis for a single visit and the
+    Ministry counts every one of them, so collapsing to a single diagnosis per
+    visit — as this did previously — silently dropped every co-diagnosis.
+
+    Attendance is a different question: a visit is one attendance however many
+    conditions were recorded at it. Only the first row for a visit therefore
+    carries count_attendance, and the compiler honours that flag, so the
+    attendance rows stay right while the condition rows are complete.
     """
     visits, order = {}, []
     for row in dict_rows:
@@ -194,22 +200,30 @@ def _collapse_emr_visits(dict_rows):
                 age = str(int(float(age))) if str(age).strip() not in ("", "None") else ""
             except (TypeError, ValueError):
                 age = str(age or "")
-            gender = str(row.get("Gender") or "").strip()
-            category = str(row.get("Visit Category") or "").strip()
             visits[key] = {
                 "PatientNo": _emr_clean_patient_no(row.get("Patient No")),
                 "Age": age,
                 "AgeUnit": "Years",
-                "Sex": _EMR_SEX.get(gender, gender),
-                "DiagnosisCode": diagnosis,
+                "Sex": _EMR_SEX.get(str(row.get("Gender") or "").strip(),
+                                    str(row.get("Gender") or "").strip()),
                 "VisitDate": _emr_format_date(row.get("Visit Date")),
-                "VisitType": _EMR_VISIT_TYPE.get(category, "New"),
+                "VisitType": _EMR_VISIT_TYPE.get(
+                    str(row.get("Visit Category") or "").strip(), "New"),
+                "_diagnoses": [],
             }
             order.append(key)
-        elif not visits[key]["DiagnosisCode"] and diagnosis:
-            visits[key]["DiagnosisCode"] = diagnosis
-    return [visits[k] for k in order]
+        if diagnosis and diagnosis not in visits[key]["_diagnoses"]:
+            visits[key]["_diagnoses"].append(diagnosis)
 
+    out = []
+    for key in order:
+        v = visits.pop(key)
+        diagnoses = v.pop("_diagnoses") or [""]
+        for i, d in enumerate(diagnoses):
+            out.append({**v, "DiagnosisCode": d,
+                        # One attendance per visit, however many conditions.
+                        "CountAttendance": "1" if i == 0 else "0"})
+    return out
 
 
 def parse_file(filename: str, content: bytes, expected_columns=None):
@@ -319,5 +333,7 @@ def validate_rows(report_type: str, rows: list, period: str):
                 "sex": sex, "age_years": years,
                 "diagnosis_code": code_norm,
                 "in_period": in_period,
+                # Absent on a clean template upload, where every row is a visit.
+                "count_attendance": str(row.get("CountAttendance", "1")).strip() != "0",
             })
     return clean, errors

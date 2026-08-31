@@ -36,8 +36,60 @@ Layouts are cached in Postgres (`form_cache`) because 105:01 alone is over half 
 
 - **Phase 1 — preview and registration.** *Complete.* All eight data sets registered with their official names, cadences and identifiers; the three period formats handled; read-only preview of the official form for every report, open to Viewers.
 - **Phase 2 — the five remaining compilers.** `MCH`, `HTS`, `PALL`, `HIV`, `TBL`. Each needs its own input shape and aggregation rules; `PALL` is smallest at 24 elements and is the sensible first.
-- **Phase 3 — direct ClinicMaster connector.** Replace the CSV round-trip with a query run from the compiler when it is on the hospital network. Note that ClinicMaster runs on **Microsoft SQL Server**, not MySQL — the driver will be `pyodbc` or `pymssql`, and the connection must be read-only and credential-scoped.
+- **Phase 3 — ClinicMaster connector.** *Complete for 105:01.* See below.
 - **Phase 4 — validation and QA.** Cross-check compiled figures against what DHIS2 already holds for the period, and flag variances before submission.
+
+## Extraction scripts
+
+The simplest of the three ways to get ClinicMaster data in, and the one most hospital machines can actually run. On the **Extraction Scripts** page a Data Officer picks their operating system, a report and a period, and downloads a script.
+
+- **Windows** gets PowerShell, which queries SQL Server through .NET with **nothing installed** — the decisive advantage on a locked-down hospital machine.
+- **macOS and Linux** get Python, needing only `pip install pymssql`.
+
+They run it on a machine connected to the hospital network, it asks for a read-only SQL password, and it writes `JRRH_<report>_<period>_strata.csv`. That file is uploaded on the Compile page like any other extract; the upload endpoint recognises it by its columns rather than its name, so a renamed file still works.
+
+Two properties are built in rather than left to the user:
+
+- **The period is baked into the SQL as literals.** A script downloaded for June cannot be run against May by accident.
+- **It aggregates before it writes.** The file holds counts by age band, sex and visit type. No patient row is ever written to disk, so nothing identifying can be uploaded, emailed, or left in a Downloads folder. `scripts/test_scripts.py` asserts the SQL returns exactly four aggregate columns and that `BirthDate` is read to derive an age but never returned.
+
+The generated Python is compiled in the test suite, because a template that produces a `SyntaxError` would fail in front of a user with no way to diagnose it. Its banding is executed and compared against the compiler's, so the script, the agent and the server cannot drift.
+
+## Pulling from ClinicMaster
+
+A second way to get data in, alongside uploading an extract. On the Compile page, choose **Pull from ClinicMaster** instead of a file.
+
+ClinicMaster is at `172.20.0.230`, a private address on the hospital LAN. A Vercel function cannot route to a private address, so the compiler does not reach into the database. A small agent runs *inside* the hospital and reaches out instead — see `agent/README.md`.
+
+```
+Hospital LAN                                    Internet
+──────────────────────────────────────────────────────────
+  ClinicMaster 172.20.0.230                   Vercel app
+        ▲                                          ▲
+        │ read-only T-SQL                          │ HTTPS
+        │                                          │ outbound only
+    jrrh-agent  ────────────────────────────────────┘
+    polls for jobs · aggregates here · posts counts
+```
+
+This shape was chosen over a tunnel for one reason above the others. HMIS reports are aggregate counts. If the cloud app queried the database directly it would read patient-level rows — names, HIV status, ART regimens — across the internet, and hold a database credential in Vercel. The agent aggregates on site and posts **strata**: counts by diagnosis, age band, sex and visit type. No patient data leaves the network, and no credential reaches Vercel. The ingestion endpoint rejects any payload carrying a patient identifier, so a mistake in the agent fails loudly rather than leaking quietly.
+
+The server never sends SQL. A job carries a report type and a period; the queries live in `agent/queries.py`, versioned here. A compromised server cannot make the agent run arbitrary statements against a database of HIV records.
+
+**Both paths must agree.** `scripts/test_agent.py` compiles the same fifty visits through the upload path and the agent path and requires every data value to match. If they ever diverge, the figures would depend on how the data arrived, which is not something anyone could defend to the Ministry.
+
+Set `AGENT_KEY` in the Vercel project (at least 24 random characters) and give the same value to the agent.
+
+| Endpoint | Who | Purpose |
+| --- | --- | --- |
+| `POST /api/py/extract` | Data Officer | Queue an extraction |
+| `GET /api/py/extract/{id}` | Any signed-in user | Job progress |
+| `GET /api/py/agents` | Any signed-in user | Whether an agent is reachable |
+| `GET /api/py/agent/next` | Agent key | Claim the next job |
+| `POST /api/py/agent/jobs/{id}/result` | Agent key | Post strata |
+| `POST /api/py/agent/heartbeat` | Agent key | Report in |
+
+**Still to finish:** the `Diagnosis` and `Diseases` column names were never confirmed, so the agent currently extracts attendance only and says so in the job notes. `python agent/jrrh_agent.py --schema` prints what is needed; completing `DIAGNOSIS_SOURCE` in `agent/queries.py` is a four-line edit.
 
 ### A note on 033B
 
@@ -88,6 +140,8 @@ Everything up to and including **Compile & Preview** is local: nothing reaches t
 | Unit checks | `python scripts/test_surveillance.py` | nothing |
 | Form and period checks | `python scripts/test_forms.py` | nothing |
 | Routing check | `python scripts/test_routes.py` | nothing |
+| Agent and connector | `python scripts/test_agent.py` | nothing |
+| Client error handling | `node scripts/test_client.mjs` | nothing |
 | Import check | `python -m py_compile api/index.py api/_lib/*.py` | nothing |
 | Local app | `npm run fastapi-dev` + `npm run dev` | `DATABASE_URL` |
 | Metadata reachable | `GET /api/py/templates/033b` | DHIS2 credentials |

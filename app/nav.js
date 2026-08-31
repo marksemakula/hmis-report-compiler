@@ -28,7 +28,11 @@ export default function Nav() {
     { href: '/reports', label: 'Reports' },
     { href: '/audit', label: 'Audit Trail' },
   ];
-  if (user?.role !== 'viewer') links.unshift({ href: '/', label: 'Compile' });
+  // Extraction scripts are a Data Officer tool; viewers have nothing to run.
+  if (user?.role !== 'viewer') {
+    links.splice(1, 0, { href: '/extract', label: 'Extraction Scripts' });
+    links.unshift({ href: '/', label: 'Compile' });
+  }
   if (user?.role === 'admin') links.push({ href: '/admin', label: 'Administration' });
 
   return (

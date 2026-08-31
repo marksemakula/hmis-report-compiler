@@ -57,12 +57,32 @@ export default function Workflow() {
   const [report, setReport] = useState(null);
   const [pushResult, setPushResult] = useState(null);
   const [dryResult, setDryResult] = useState(null);
+  const [source, setSource] = useState('upload');   // 'upload' | 'agent'
+  const [agentInfo, setAgentInfo] = useState(null);
+  const [job, setJob] = useState(null);
 
   useEffect(() => {
     fetch('/api/py/auth/me').then((r) => { if (!r.ok) router.push('/login'); });
   }, [router]);
 
+  // Whether an extraction agent inside the hospital has reported in recently.
+  useEffect(() => {
+    let live = true;
+    const poll = () => fetch('/api/py/agents')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((b) => { if (live && b) setAgentInfo(b); })
+      .catch(() => {});
+    poll();
+    const t = setInterval(poll, 30000);
+    return () => { live = false; clearInterval(t); };
+  }, []);
+
   const weekly = REPORTS[reportType].cadence === 'weekly';
+  // Only 105:01 has an extractor in the agent so far.
+  const agentCapable = reportType === 'OPD';
+  useEffect(() => {
+    if (!agentCapable && source === 'agent') setSource('upload');
+  }, [agentCapable, source]);
   const period = weekly ? `${weekYear}W${week}` : `${year}${String(month).padStart(2, '0')}`;
   const periodLabel = weekly
     ? `week ${week} of ${weekYear} (${weekRange(weekYear, week)})`
@@ -106,6 +126,43 @@ export default function Workflow() {
     }
   };
 
+  /* Ask the on-premise agent to extract this period from ClinicMaster, then
+     wait for it. Nothing here touches the database: the request is queued, an
+     agent inside the hospital runs it and posts back anonymous counts. */
+  const doExtract = async () => {
+    setBusy(true); setError(''); setJob(null);
+    try {
+      const r = await fetch('/api/py/extract', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ report_type: reportType, period }),
+      });
+      const body = await r.json();
+      if (!r.ok) throw new Error(describeError(r.status, body, 'Could not queue the extraction'));
+      setJob({ id: body.job_id, state: 'QUEUED', note: body.note });
+
+      const started = Date.now();
+      for (;;) {
+        await new Promise((res) => setTimeout(res, 3000));
+        const s = await fetch(`/api/py/extract/${body.job_id}`);
+        const st = await s.json();
+        if (!s.ok) throw new Error(describeError(s.status, st, 'Lost track of the extraction'));
+        setJob({ id: body.job_id, state: st.state, note: st.message || body.note });
+        if (st.state === 'DONE') {
+          const n = st.stratum_count || 0;
+          setUpload({ import_id: st.import_id, rows: n, valid_rows: n,
+                      rows_in_period: n, errors: [], error_count: 0, from_agent: true });
+          setStep(1);
+          return;
+        }
+        if (st.state === 'FAILED') throw new Error(st.message || 'The extraction failed');
+        if (st.state === 'EXPIRED') throw new Error('The extraction was superseded by a newer request');
+        if (Date.now() - started > 10 * 60 * 1000)
+          throw new Error('The extraction has not completed after ten minutes. '
+            + 'Check that the agent on the hospital network is running.');
+      }
+    } catch (err) { setError(err.message); } finally { setBusy(false); }
+  };
+
   const doCompile = async () => {
     setBusy(true); setError('');
     try {
@@ -138,7 +195,7 @@ export default function Workflow() {
     } catch (err) { setError(err.message); } finally { setBusy(false); }
   };
 
-  const reset = () => { setStep(0); setUpload(null); setCompiled(null); setReport(null); setPushResult(null); setDryResult(null); setFile(null); setError(''); };
+  const reset = () => { setStep(0); setUpload(null); setCompiled(null); setReport(null); setPushResult(null); setDryResult(null); setFile(null); setError(''); setJob(null); };
 
   return (
     <>
@@ -210,13 +267,72 @@ export default function Workflow() {
           <p style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 0 }}>
             Reporting period: <strong>{period}</strong> — {periodLabel}
           </p>
-          <div style={{ marginTop: 14 }}>
-            <label>Data file (.csv, .xlsx)</label>
-            <input type="file" accept=".csv,.xlsx,.xls" onChange={(e) => setFile(e.target.files[0])} required />
+          <div style={{ marginTop: 16 }}>
+            <label>Where should the data come from?</label>
+            <div style={{ display: 'flex', gap: 18, marginTop: 4, flexWrap: 'wrap' }}>
+              <label style={{ fontWeight: 400, cursor: 'pointer' }}>
+                <input type="radio" name="source" checked={source === 'upload'}
+                       onChange={() => setSource('upload')} />{' '}
+                Upload an extract
+              </label>
+              <label style={{ fontWeight: 400, cursor: agentCapable ? 'pointer' : 'not-allowed',
+                              opacity: agentCapable ? 1 : 0.5 }}>
+                <input type="radio" name="source" checked={source === 'agent'}
+                       disabled={!agentCapable}
+                       onChange={() => setSource('agent')} />{' '}
+                Pull from ClinicMaster
+                {agentInfo && (
+                  <span style={{ marginLeft: 8, fontSize: 12,
+                                 color: agentInfo.online ? 'var(--ok)' : 'var(--bad)' }}>
+                    ● agent {agentInfo.online ? 'online' : 'offline'}
+                  </span>
+                )}
+              </label>
+            </div>
+            {!agentCapable && (
+              <p style={{ color: 'var(--muted)', fontSize: 12, margin: '6px 0 0' }}>
+                Direct extraction is available for 105:01 only so far; the other reports
+                still need an uploaded extract.
+              </p>
+            )}
           </div>
-          <div style={{ marginTop: 18 }}>
-            <button className="btn" disabled={busy || !file}>{busy ? (progress > 0 && progress < 100 ? 'Uploading… ' + Math.round(progress) + '%' : 'Processing…') : 'Upload and validate'}</button>
-          </div>
+
+          {source === 'upload' ? (
+            <>
+              <div style={{ marginTop: 14 }}>
+                <label>Data file (.csv, .xlsx)</label>
+                <input type="file" accept=".csv,.xlsx,.xls" onChange={(e) => setFile(e.target.files[0])} />
+              </div>
+              <div style={{ marginTop: 18 }}>
+                <button className="btn" disabled={busy || !file}>{busy ? (progress > 0 && progress < 100 ? 'Uploading… ' + Math.round(progress) + '%' : 'Processing…') : 'Upload and validate'}</button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: 14 }}>
+                The request is queued for the extraction agent running inside the hospital.
+                It runs a read-only query against ClinicMaster, aggregates on site, and returns
+                counts only — no patient-level data leaves the hospital network.
+              </p>
+              {job && (
+                <div className={`alert ${job.state === 'FAILED' ? 'error' : 'info'}`}>
+                  Job #{job.id} — {job.state.toLowerCase()}
+                  {job.note ? `. ${job.note}` : '.'}
+                </div>
+              )}
+              {agentInfo && !agentInfo.online && !job && (
+                <div className="alert info">
+                  No agent has reported in for over three minutes. You can still queue the
+                  extraction; it will run when the agent is next started.
+                </div>
+              )}
+              <div style={{ marginTop: 14 }}>
+                <button type="button" className="btn" onClick={doExtract} disabled={busy}>
+                  {busy ? 'Extracting…' : `Pull ${periodLabel} from ClinicMaster`}
+                </button>
+              </div>
+            </>
+          )}
         </form>
       )}
 
@@ -224,8 +340,8 @@ export default function Workflow() {
         <div className="card">
           <h2>Validation results</h2>
           <div className="kpis">
-            <div className="kpi"><div className="n">{upload.rows}</div><div className="l">{weekly ? 'Lines read' : 'Rows read'}</div></div>
-            <div className="kpi"><div className="n">{upload.valid_rows}</div><div className="l">{weekly ? 'Indicators accepted' : 'Valid rows'}</div></div>
+            <div className="kpi"><div className="n">{upload.rows}</div><div className="l">{upload.from_agent ? 'Strata received' : weekly ? 'Lines read' : 'Rows read'}</div></div>
+            <div className="kpi"><div className="n">{upload.valid_rows}</div><div className="l">{upload.from_agent ? 'Accepted' : weekly ? 'Indicators accepted' : 'Valid rows'}</div></div>
             <div className="kpi"><div className="n">{upload.rows_in_period}</div><div className="l">{weekly ? 'Values reported' : `In ${periodLabel}`}</div></div>
             <div className="kpi"><div className="n" style={{ color: upload.error_count ? 'var(--bad)' : 'var(--ok)' }}>{upload.error_count}</div><div className="l">{weekly ? 'Lines with errors' : 'Rows with errors'}</div></div>
           </div>

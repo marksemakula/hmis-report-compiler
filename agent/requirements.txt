@@ -1,0 +1,4 @@
+# One SQL Server driver is required. pymssql is self-contained and usually the
+# easier install; pyodbc is faster but needs Microsoft's ODBC driver present.
+pymssql==2.3.2
+# pyodbc==5.2.0

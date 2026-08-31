@@ -8,9 +8,11 @@ IPD (HMIS 108):
   - CI02 admissions, CI03 deaths, CI04 patient days by Ward Type
   - Section 6 diagnoses: Cases (<code>a) and Deaths (<code>b) by Age(0-4, 5+) and sex
 """
+import re
 from collections import defaultdict
 from datetime import date
 
+from .diagnosis_map import map_diagnosis
 from .validators import mapping, ipd_diagnosis_index
 
 OPD_BANDS = [
@@ -58,6 +60,21 @@ def _coc(cc_key: str, name: str):
     return mapping()["categoryCombos"][cc_key]["cocs"].get(name)
 
 
+
+# The Ministry's home for conditions with no element of their own. Diagnoses
+# that map nowhere are tallied here rather than discarded, which is what DHIS2
+# expects and what makes the column totals reconcile.
+ALL_OTHERS_CODE = "OP01"
+
+
+def _all_others(code_index):
+    """The OP01 data element id, or None if this instance does not carry it."""
+    for key in (ALL_OTHERS_CODE, ALL_OTHERS_CODE.lower()):
+        if key in code_index:
+            return code_index[key]
+    return None
+
+
 def compile_opd(rows: list, period: str):
     m = mapping()
     code_index = m["HMIS105_01_codeIndex"]
@@ -71,15 +88,21 @@ def compile_opd(rows: list, period: str):
         band = opd_band(r["age_years"])
         coc_name = f"{band}, {r['sex']}"
 
-        # attendance
-        att_de = m["keyDataElements"]["OA01_newAttendance"] if r["visit_type"] == "New" \
-            else m["keyDataElements"]["OA02_reAttendance"]
-        counts[(att_de, _coc("OPD_AGE_SEX", coc_name))] += 1
+        # Attendance: once per visit. A visit with three conditions recorded
+        # is still one attendance, so rows after the first carry
+        # count_attendance False and only add to the condition tallies.
+        if r.get("count_attendance", True):
+            att_de = m["keyDataElements"]["OA01_newAttendance"] if r["visit_type"] == "New" \
+                else m["keyDataElements"]["OA02_reAttendance"]
+            counts[(att_de, _coc("OPD_AGE_SEX", coc_name))] += 1
 
         # diagnosis
         de_id = code_index.get(r["diagnosis_code"])
         if not de_id:
+            other = _all_others(code_index)
             unmapped[r["diagnosis_code"]] += 1
+            if other:
+                counts[(other, _coc("OPD_AGE_SEX", coc_name))] += 1
             continue
         cc = des[de_id]["categoryCombo"]
         if cc == m["categoryCombos"]["OPD_AGE_SEX"]["id"]:
@@ -88,6 +111,62 @@ def compile_opd(rows: list, period: str):
             counts[(de_id, _coc("DEFAULT", "default"))] += 1
         else:
             unmapped[r["diagnosis_code"] + " (non-standard disaggregation)"] += 1
+
+    return _to_values(counts, "HMIS105_01"), _unmapped_list(unmapped)
+
+
+def compile_opd_strata(rows: list, period: str):
+    """Compile OPD from anonymous strata supplied by the on-premise agent.
+
+    Identical arithmetic to compile_opd — the same code index, the same
+    category option combos, the same unmapped-code reporting — but the age band
+    arrives already computed and each row carries a weight instead of standing
+    for a single visit. That keeps a 40,000-visit month to a few hundred rows
+    while producing figures indistinguishable from the upload path.
+
+    The diagnosis arrives as free text, exactly as it does from a raw EMR
+    export, and goes through the same map_diagnosis translation."""
+    m = mapping()
+    code_index = m["HMIS105_01_codeIndex"]
+    des = m["dataElements"]["HMIS105_01"]
+    counts = defaultdict(int)
+    unmapped = defaultdict(int)
+
+    for r in rows:
+        if not r.get("in_period"):
+            continue
+        weight = int(r.get("weight", 1) or 0)
+        if weight <= 0:
+            continue
+        coc_name = f"{r['age_band']}, {r['sex']}"
+        att_coc = _coc("OPD_AGE_SEX", coc_name)
+        if att_coc is None:
+            unmapped[f"{coc_name} (unknown age band or sex)"] += weight
+            continue
+
+        if r.get("count_attendance", True):
+            att_de = m["keyDataElements"]["OA01_newAttendance"] if r["visit_type"] == "New" \
+                else m["keyDataElements"]["OA02_reAttendance"]
+            counts[(att_de, att_coc)] += weight
+
+        raw = str(r.get("diagnosis_code") or "").strip()
+        code = map_diagnosis(raw, code_index) if raw else ""
+        code = re.sub(r"\s+", "", code)
+        de_id = code_index.get(code)
+        if not de_id:
+            other = _all_others(code_index)
+            unmapped[raw or "(blank diagnosis)"] += weight
+            if other:
+                counts[(other, att_coc)] += weight
+            continue
+
+        cc = des[de_id]["categoryCombo"]
+        if cc == m["categoryCombos"]["OPD_AGE_SEX"]["id"]:
+            counts[(de_id, att_coc)] += weight
+        elif cc == m["categoryCombos"]["DEFAULT"]["id"]:
+            counts[(de_id, _coc("DEFAULT", "default"))] += weight
+        else:
+            unmapped[raw + " (non-standard disaggregation)"] += weight
 
     return _to_values(counts, "HMIS105_01"), _unmapped_list(unmapped)
 

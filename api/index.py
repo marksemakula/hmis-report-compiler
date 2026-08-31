@@ -8,18 +8,19 @@ sys.path.append(os.path.dirname(__file__))
 
 import requests
 
-from fastapi import FastAPI, HTTPException, Request, Response, Depends
+from fastapi import FastAPI, Header, HTTPException, Request, Response, Depends
 from pydantic import BaseModel
 
 from _lib import db
 from _lib.auth import issue_token, current_user, require_role
 from _lib.validators import parse_file, validate_rows, mapping, OPD_COLUMNS, IPD_COLUMNS
-from _lib.compiler import compile_opd, compile_ipd
+from _lib.compiler import compile_opd, compile_ipd, compile_opd_strata
+from _lib import agent as agentlib
 from _lib.surveillance import (
     SURV_COLUMNS, compile_033b, describe_week, parse_week_period,
     template_csv, validate_surveillance_rows,
 )
-from _lib import dhis2, forms, periods
+from _lib import dhis2, extract_scripts, forms, periods
 
 EXPECTED_COLUMNS = {"OPD": OPD_COLUMNS, "IPD": IPD_COLUMNS, "SURV": SURV_COLUMNS}
 
@@ -144,21 +145,36 @@ def upload(body: UploadBody, user: dict = Depends(current_user)):
     if not rows:
         err("The file contains no data rows. Check that the register was "
             "exported into a sheet whose first row has the template headers.")
+    # A file written by a generated extraction script is already aggregated:
+    # counts by diagnosis, age band, sex and visit type. Recognised by its
+    # columns rather than its name, so a renamed file still works.
+    source = "UPLOAD"
     if body.report_type == "SURV":
         clean, errors = validate_surveillance_rows(rows, period)
+    elif extract_scripts.looks_like_strata(rows[0].keys() if rows else None):
+        try:
+            strata = agentlib.validate_strata([
+                {k: v for k, v in r.items() if k in extract_scripts.strata_columns()}
+                for r in rows])
+        except ValueError as exc:
+            err(f"This looks like an extraction-script file, but it was rejected: {exc}")
+        clean = agentlib.strata_to_rows(strata)
+        errors = []
+        source = "SCRIPT"
     else:
         clean, errors = validate_rows(body.report_type, rows, period)
     in_period = sum(1 for r in clean if r["in_period"])
 
     with db.get_conn() as conn:
         with conn.cursor() as cur:
+            cur.execute("ALTER TABLE imported_data ADD COLUMN IF NOT EXISTS "
+                        "source VARCHAR(32) NOT NULL DEFAULT 'UPLOAD'")
             cur.execute(
                 """INSERT INTO imported_data
-                   (file_name, report_type, period, row_count, error_count, original_data, validation_errors, uploaded_by, processing_status)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                   (file_name, report_type, period, row_count, error_count, original_data, validation_errors, uploaded_by, processing_status, source)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
                 (body.filename, body.report_type, period, len(rows), len(errors),
-                 json.dumps(clean), json.dumps(errors), user["sub"],
-                 "PENDING" if not errors else "PENDING"),
+                 json.dumps(clean), json.dumps(errors), user["sub"], "PENDING", source),
             )
             import_id = cur.fetchone()["id"]
     db.audit(user["sub"], "File uploaded", {
@@ -193,7 +209,13 @@ def compile_report(body: CompileBody, user: dict = Depends(current_user)):
     rows = imp["original_data"]
     if isinstance(rows, str):
         rows = json.loads(rows)
-    if imp["report_type"] == "OPD":
+    # Rows staged by the on-premise agent arrive pre-banded and weighted, so
+    # they take the strata compiler. Both paths share the same code index,
+    # category combos and unmapped-code reporting, and must agree.
+    from_agent = str(imp.get("source") or "UPLOAD").upper() in ("AGENT", "SCRIPT")
+    if imp["report_type"] == "OPD" and from_agent:
+        values, unmapped = compile_opd_strata(rows, imp["period"])
+    elif imp["report_type"] == "OPD":
         values, unmapped = compile_opd(rows, imp["period"])
     elif imp["report_type"] == "SURV":
         values, unmapped = compile_033b(rows, imp["period"])
@@ -425,6 +447,161 @@ def meta_refresh(user: dict = Depends(current_user)):
         err(str(exc), 503)
 
 
+# ---------------- ClinicMaster extraction, via the on-premise agent ----------------
+
+AGENT_CAPABLE = {"OPD"}   # report types the agent can extract today
+
+
+class ExtractBody(BaseModel):
+    report_type: str
+    period: str
+
+
+@app.post("/api/py/extract")
+def request_extraction(body: ExtractBody, user: dict = Depends(current_user)):
+    """Queue a pull from ClinicMaster. The agent inside the hospital picks this
+    up on its next poll; nothing here reaches the database directly."""
+    require_role(user, "data_officer")
+    entry = report_type_entry(body.report_type)
+    rt = body.report_type.upper()
+    if rt not in AGENT_CAPABLE:
+        err(f"{entry['short']} cannot be pulled from ClinicMaster yet. "
+            f"Available today: " + ", ".join(sorted(AGENT_CAPABLE)))
+    period = check_period(rt, body.period)
+
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            status = agentlib.agent_status(cur)
+            job_id = agentlib.queue_job(cur, rt, period, user["sub"])
+    db.audit(user["sub"], "ClinicMaster extraction requested",
+             {"job_id": job_id, "type": rt, "period": period})
+    return {
+        "job_id": job_id,
+        "state": "QUEUED",
+        "agent_online": status["online"],
+        "note": None if status["online"] else
+                "No agent has reported in for over three minutes. The job is queued "
+                "and will run as soon as the agent on the hospital network is started.",
+    }
+
+
+@app.get("/api/py/extract/{job_id}")
+def extraction_status(job_id: int, user: dict = Depends(current_user)):
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            agentlib.ensure_tables(cur)
+            cur.execute("""SELECT id, report_type, period, state, requested_by,
+                                  requested_at, finished_at, agent, stratum_count,
+                                  message, import_id
+                           FROM extraction_jobs WHERE id=%s""", (job_id,))
+            row = cur.fetchone()
+    if not row:
+        err("Extraction job not found", 404)
+    out = dict(row)
+    for k in ("requested_at", "finished_at"):
+        out[k] = str(out[k]) if out[k] else None
+    return out
+
+
+@app.get("/api/py/agents")
+def agents(user: dict = Depends(current_user)):
+    """Whether an extraction agent is currently reachable, for the UI to show."""
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            return agentlib.agent_status(cur)
+
+
+# --- agent-facing. Authenticated by AGENT_KEY, never by a user session. ---
+
+@app.post("/api/py/agent/heartbeat")
+def agent_heartbeat(body: dict, authorization: str = Header(default="")):
+    agentlib.require_agent(authorization)
+    ident = agentlib.fingerprint(agentlib.agent_key())
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            agentlib.record_heartbeat(cur, ident,
+                                      str(body.get("version", ""))[:32],
+                                      str(body.get("host", ""))[:128],
+                                      str(body.get("note", ""))[:500])
+    return {"ok": True, "agent": ident}
+
+
+@app.get("/api/py/agent/next")
+def agent_next_job(authorization: str = Header(default="")):
+    """Hand the agent its next job. The response carries a report type and a
+    period and nothing else — never SQL. The queries live in the agent's own
+    package, so a compromised server cannot make it run arbitrary statements
+    against a database of HIV records."""
+    agentlib.require_agent(authorization)
+    ident = agentlib.fingerprint(agentlib.agent_key())
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            agentlib.record_heartbeat(cur, ident, note="polling")
+            job = agentlib.claim_job(cur, ident)
+    if not job:
+        return {"job": None}
+    return {"job": {"id": job["id"], "report_type": job["report_type"],
+                    "period": job["period"]}}
+
+
+@app.post("/api/py/agent/jobs/{job_id}/result")
+def agent_post_result(job_id: int, body: dict, authorization: str = Header(default="")):
+    """Ingest anonymous strata from the agent and stage them for compilation."""
+    agentlib.require_agent(authorization)
+
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            agentlib.ensure_tables(cur)
+            cur.execute("SELECT * FROM extraction_jobs WHERE id=%s", (job_id,))
+            job = cur.fetchone()
+            if not job:
+                err("Extraction job not found", 404)
+            if job["state"] not in ("RUNNING", "QUEUED"):
+                err(f"Job {job_id} is {job['state']} and no longer accepts a result", 409)
+
+            if body.get("error"):
+                cur.execute("""UPDATE extraction_jobs SET state='FAILED', finished_at=now(),
+                               message=%s WHERE id=%s""",
+                            (str(body["error"])[:2000], job_id))
+                return {"ok": True, "state": "FAILED"}
+
+            try:
+                strata = agentlib.validate_strata(body.get("strata"))
+            except ValueError as exc:
+                cur.execute("""UPDATE extraction_jobs SET state='FAILED', finished_at=now(),
+                               message=%s WHERE id=%s""", (str(exc)[:2000], job_id))
+                err(f"Rejected: {exc}", 400)
+
+            summary = agentlib.summarise(strata)
+            rows = agentlib.strata_to_rows(strata)
+
+            cur.execute("ALTER TABLE imported_data ADD COLUMN IF NOT EXISTS "
+                        "source VARCHAR(32) NOT NULL DEFAULT 'UPLOAD'")
+            cur.execute(
+                """INSERT INTO imported_data
+                   (file_name, report_type, period, row_count, error_count,
+                    original_data, validation_errors, uploaded_by, processing_status, source)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                (f"ClinicMaster {job['report_type']} {job['period']}",
+                 job["report_type"], job["period"], summary["strata"], 0,
+                 json.dumps(rows), json.dumps([]), job["requested_by"],
+                 "PENDING", "AGENT"))
+            import_id = cur.fetchone()["id"]
+
+            cur.execute("""UPDATE extraction_jobs
+                           SET state='DONE', finished_at=now(), strata=%s,
+                               stratum_count=%s, import_id=%s, message=%s
+                           WHERE id=%s""",
+                        (json.dumps(summary), summary["strata"], import_id,
+                         f"{summary['visits']:,} visits across {summary['strata']:,} strata",
+                         job_id))
+
+    db.audit(job["requested_by"], "ClinicMaster extraction completed", {
+        "job_id": job_id, "import_id": import_id, "type": job["report_type"],
+        "period": job["period"], **summary})
+    return {"ok": True, "state": "DONE", "import_id": import_id, "summary": summary}
+
+
 # ---------------- preview (any signed-in user, including viewers) ----------------
 
 def _latest_report(report_type: str, period: str):
@@ -541,6 +718,46 @@ def forms_refresh(user: dict = Depends(current_user)):
         err(str(exc), 503)
     db.audit(user["sub"], "Form layouts refreshed", result)
     return {"ok": True, "slots": result}
+
+
+@app.get("/api/py/scripts/{report_type}")
+def extraction_script(report_type: str, period: str = "", os: str = "windows",
+                      user: dict = Depends(current_user)):
+    """A ready-to-run extraction script for one report, period and platform.
+
+    The period is baked into the SQL as literals, so a script downloaded for
+    June cannot be run against May by accident."""
+    require_role(user, "data_officer")
+    # Utility scripts describe the database rather than extract a report, so
+    # they carry no period and no report type to validate.
+    if report_type.lower() in extract_scripts.UTILITIES:
+        period_type, label = "Monthly", ""
+    else:
+        entry = report_type_entry(report_type)
+        period = check_period(report_type, period)
+        period_type, label = entry["periodType"], entry["short"]
+    try:
+        name, text = extract_scripts.generate(
+            report_type=report_type, period=period, os_key=os,
+            period_type=period_type, report_label=label)
+    except ValueError as exc:
+        err(str(exc))
+    return Response(
+        content=text, media_type="text/plain; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{name}"',
+                 "Cache-Control": "no-store"})
+
+
+@app.get("/api/py/scripts")
+def extraction_script_options(user: dict = Depends(current_user)):
+    """Which platforms and reports the script generator supports."""
+    return {
+        "operatingSystems": [
+            {"key": k, **v} for k, v in extract_scripts.OS_CHOICES.items()
+        ],
+        "reports": sorted(extract_scripts.SCRIPTABLE),
+        "utilities": [{"key": k, **v} for k, v in extract_scripts.UTILITIES.items()],
+    }
 
 
 @app.get("/api/py/templates/033b")
