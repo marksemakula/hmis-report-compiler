@@ -47,7 +47,23 @@ The blank 033B template is generated from live DHIS2 metadata at `/api/py/templa
 2. **Validate** — mandatory fields, data types, dates, diagnosis codes and ward names are checked; failing rows are listed and excluded.
 3. **Compile** — records are aggregated: OPD by diagnosis × age band (0–28d, 29d–4y, 5–9y, 10–19y, 20+) × sex; IPD ward services (CI02 admissions, CI03 deaths, CI04 patient days, CI05 average length of stay) by ward, and Section 6 diagnoses (Cases/Deaths) by age band × sex.
 4. **Preview** — the compiled report is displayed for review.
-5. **Submit** — a `dataValueSet` payload is POSTed to DHIS2 with retry and full response handling; the outcome is recorded in the audit trail.
+5. **Dry run** *(optional)* — the same payload is sent with `?dryRun=true`. DHIS2 validates it and returns the identical import summary, but writes nothing. Every conflict a real submission would raise appears exactly as it would. The report's status is left untouched, so a rehearsal is never mistaken for a submission.
+6. **Submit** — a `dataValueSet` payload is POSTed to DHIS2 with retry and full response handling; the outcome is recorded in the audit trail.
+
+## Testing a change before it is pushed
+
+Everything up to and including **Compile & Preview** is local: nothing reaches the national instance. Only *Submit* writes. In order of cost:
+
+| Step | Command | Needs |
+| --- | --- | --- |
+| Unit checks | `python scripts/test_surveillance.py` | nothing |
+| Import check | `python -m py_compile api/index.py api/_lib/*.py` | nothing |
+| Local app | `npm run fastapi-dev` + `npm run dev` | `DATABASE_URL` |
+| Metadata reachable | `GET /api/py/templates/033b` | DHIS2 credentials |
+| Submission rehearsal | **Dry run** button, or `POST /api/py/push {"report_id":N,"dry_run":true}` | DHIS2 credentials |
+| Permissions check | `GET /api/py/dhis2/preflight?report_type=SURV` | DHIS2 credentials |
+
+`preflight` is read-only and answers the question that usually explains a submission which returns SUCCESS yet writes nothing: whether the data set is assigned to the org unit, whether the account holds data-write sharing, and whether the period is open.
 
 ## Roles
 

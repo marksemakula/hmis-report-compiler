@@ -50,6 +50,23 @@ check("033B- uppercase prefix", metadata._build_code_index(FIXTURE).get("CD01a")
 check("033b- lowercase prefix", metadata._build_code_index(FIXTURE).get("AP03"), "de_ap03")
 check("code without a full stop", metadata._build_code_index(FIXTURE).get("CD23e_2019"), "de_cd23e")
 
+print("\nRegression: the widened regex must not change 105/108 parsing")
+import re  # noqa: E402
+_OLD = re.compile(r"^(105|108)-([A-Za-z0-9_]+)[\.\s]\s*(.*)$")
+_NEW = re.compile(r"^(105|108|033[Bb])-([A-Za-z0-9_]+)[\.\s]\s*(.*)$")
+for name in [
+    "105-OA01. New attendance",
+    "105-EP01c. Malaria (Confirmed)",
+    "105-MH26. Epilepsy",
+    "108-CD01a. Cholera - Cases",
+    "108-CV01a1. Maternal condition - Cases",
+    "108-ME06a_2019. Measles - Cases",
+]:
+    old, new = _OLD.match(name), _NEW.match(name)
+    check(f"unchanged: {name[:34]}",
+          new.groups() if new else None,
+          old.groups() if old else None)
+
 print("\nISO weekly periods")
 check("mid-year week", s.week_period(date(2026, 8, 25)), "2026W35")
 check("period parses", s.parse_week_period("2026W35"), (2026, 35))
@@ -109,6 +126,22 @@ check("header", lines[0], "Code,Label,Value")
 check("one line per element", len(lines) - 1, len(FIXTURE))
 check("labels stripped of the code prefix", 'CD01a,"Malaria (Confirmed) - Cases",' in csv_text, True)
 check("value column left blank", lines[1].endswith(","), True)
+
+print("\nStale metadata must fail loudly, not silently compile nothing")
+_saved = metadata._MAPPING
+metadata._MAPPING = {**metadata.CONSTANTS,
+                     "dataElements": {"HMIS033B": {}},
+                     "HMIS033B_codeIndex": {}}
+s.reset_index()
+try:
+    s.surveillance_index()
+    check("empty 033B index raises", "no exception", "RuntimeError")
+except RuntimeError as exc:
+    check("empty 033B index raises", "Refresh metadata" in str(exc), True)
+finally:
+    metadata._MAPPING = _saved
+    s.reset_index()
+check("index restored after the check", bool(s.surveillance_index()), True)
 
 print()
 if failures:

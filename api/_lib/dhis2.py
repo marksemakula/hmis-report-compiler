@@ -160,10 +160,18 @@ def build_payload(report_type: str, period: str, data_values: list, org_unit: st
     return payload
 
 
-def submit(payload: dict, max_retries: int = 3):
-    """POST the dataValueSet with retry and exponential back-off."""
+def submit(payload: dict, max_retries: int = 3, dry_run: bool = False):
+    """POST the dataValueSet with retry and exponential back-off.
+
+    With dry_run, DHIS2 validates the payload and returns the identical import
+    summary it would have produced, but writes nothing. Every conflict a real
+    submission would raise — unknown element, closed period, missing capture
+    right — surfaces exactly as it would, which makes this the safe way to
+    exercise the whole path against the live national instance."""
     s = _session()
     url = f"{base_url()}/api/dataValueSets"
+    if dry_run:
+        url += "?dryRun=true"
     last_error = None
     for attempt in range(1, max_retries + 1):
         try:

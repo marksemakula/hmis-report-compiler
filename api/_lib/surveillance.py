@@ -35,6 +35,16 @@ def surveillance_index() -> dict:
     if _SURV_INDEX is not None:
         return _SURV_INDEX
     idx = mapping().get("HMIS033B_codeIndex", {})
+    if not idx:
+        # The 105/108 metadata can be served from a cache written before 033B
+        # existed. Failing loudly here beats accepting a tally and silently
+        # compiling nothing, which looks like a data problem rather than a
+        # configuration one.
+        raise RuntimeError(
+            "The HMIS 033B data element list is empty. The cached DHIS2 metadata "
+            "predates this report. Set DHIS2_USERNAME and DHIS2_PASSWORD (or "
+            "DHIS2_PAT) and run Refresh metadata in the admin page."
+        )
     _SURV_INDEX = {str(k).upper(): v for k, v in idx.items()}
     return _SURV_INDEX
 
