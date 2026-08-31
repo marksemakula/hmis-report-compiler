@@ -86,6 +86,8 @@ Everything up to and including **Compile & Preview** is local: nothing reaches t
 | Step | Command | Needs |
 | --- | --- | --- |
 | Unit checks | `python scripts/test_surveillance.py` | nothing |
+| Form and period checks | `python scripts/test_forms.py` | nothing |
+| Routing check | `python scripts/test_routes.py` | nothing |
 | Import check | `python -m py_compile api/index.py api/_lib/*.py` | nothing |
 | Local app | `npm run fastapi-dev` + `npm run dev` | `DATABASE_URL` |
 | Metadata reachable | `GET /api/py/templates/033b` | DHIS2 credentials |
@@ -111,4 +113,10 @@ python scripts/generate_sample_data.py .   # sample files for testing
 python scripts/test_surveillance.py        # 033B checks — no DB or network needed
 ```
 
-`scripts/test_surveillance.py` stubs the DHIS2 metadata with a fixture that reproduces the national instance's naming inconsistencies (both `033B-` and `033b-` prefixes, and one element whose code is not followed by a full stop), then exercises ISO week handling, tally validation, compilation and template generation. It runs offline in under a second.
+`scripts/test_surveillance.py` stubs the DHIS2 metadata with a fixture that reproduces the national instance's naming inconsistencies (both `033B-` and `033b-` prefixes, and one element whose code is not followed by a full stop), then exercises ISO week handling, tally validation, compilation and template generation.
+
+`scripts/test_forms.py` checks the eight registrations, the element-name prefixes across all data set families, all three period cadences, and the form sanitiser — which it feeds a deliberately hostile form to confirm no script, handler or `javascript:` URL survives and that injected values are escaped.
+
+`scripts/test_routes.py` parses the route declarations and fails if a literal path is shadowed by an earlier parameterised sibling. FastAPI matches in declaration order, so `/api/py/reports/types` declared after `/api/py/reports/{report_id}` is unreachable and returns **422**, not 404 — which reads like a validation bug rather than a routing one. That is why the report list lives at `/api/py/report-types`. The check also confirms every `/api/py/` URL the front end calls resolves to a declared route.
+
+All three run offline in about a second and need neither a database nor credentials.

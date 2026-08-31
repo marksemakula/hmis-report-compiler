@@ -236,6 +236,18 @@ def list_reports(user: dict = Depends(current_user)):
             return {"reports": [dict(r) for r in cur.fetchall()]}
 
 
+@app.get("/api/py/reports/types")
+def report_types_alias(user: dict = Depends(current_user)):
+    """Alias for /api/py/report-types.
+
+    MUST stay above /api/py/reports/{report_id}: FastAPI matches in declaration
+    order, and below it this literal path is swallowed by the typed parameter
+    and rejected with 422. It exists so a browser or deployment still holding an
+    older bundle keeps working instead of failing with a validation error that
+    looks nothing like a routing problem."""
+    return report_types(user)
+
+
 @app.get("/api/py/reports/{report_id}")
 def get_report(report_id: int, user: dict = Depends(current_user)):
     with db.get_conn() as conn:
@@ -427,9 +439,15 @@ def _latest_report(report_type: str, period: str):
             return cur.fetchone()
 
 
-@app.get("/api/py/reports/types")
+@app.get("/api/py/report-types")
 def report_types(user: dict = Depends(current_user)):
-    """The eight registered reports, for the preview tabs and the upload picker."""
+    """The eight registered reports, for the preview tabs and the upload picker.
+
+    Deliberately NOT /api/py/reports/types: FastAPI matches routes in
+    declaration order, so a literal path under /api/py/reports/ is shadowed by
+    the earlier /api/py/reports/{report_id}, which then rejects 'types' as a
+    non-integer with 422. A sibling path avoids the whole class of problem
+    rather than relying on where in this file the route happens to sit."""
     out = []
     for key, e in mapping().get("reportTypes", {}).items():
         out.append({

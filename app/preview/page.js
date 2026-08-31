@@ -1,6 +1,7 @@
 'use client';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { apiGet } from '../lib';
 
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
@@ -36,11 +37,10 @@ export default function Preview() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch('/api/py/reports/types')
-      .then(async (r) => {
-        if (r.status === 401) { router.push('/login'); return null; }
-        if (!r.ok) throw new Error((await r.json()).detail || 'Could not load the report list');
-        return r.json();
+    apiGet('/api/py/report-types', 'Could not load the report list')
+      .catch((e) => {
+        if (e.status === 401) { router.push('/login'); return null; }
+        throw e;
       })
       .then((body) => {
         if (!body) return;
@@ -60,8 +60,8 @@ export default function Preview() {
   const refreshStatus = useCallback(() => {
     if (!current || !period) return;
     setStatus(null);
-    fetch(`/api/py/preview/${current.type}/status?period=${encodeURIComponent(period)}`)
-      .then(async (r) => (r.ok ? r.json() : Promise.reject(new Error((await r.json()).detail || 'Preview unavailable'))))
+    apiGet(`/api/py/preview/${current.type}/status?period=${encodeURIComponent(period)}`,
+           'Preview unavailable')
       .then(setStatus)
       .catch((e) => setError(e.message));
   }, [current, period]);
