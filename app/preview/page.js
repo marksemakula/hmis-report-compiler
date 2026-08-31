@@ -36,7 +36,7 @@ export default function Preview() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch('/api/py/reports/types')
+    fetch('/api/py/report-types')
       .then(async (r) => {
         if (r.status === 401) { router.push('/login'); return null; }
         if (!r.ok) throw new Error((await r.json()).detail || 'Could not load the report list');

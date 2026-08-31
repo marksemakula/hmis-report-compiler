@@ -427,9 +427,15 @@ def _latest_report(report_type: str, period: str):
             return cur.fetchone()
 
 
-@app.get("/api/py/reports/types")
+@app.get("/api/py/report-types")
 def report_types(user: dict = Depends(current_user)):
-    """The eight registered reports, for the preview tabs and the upload picker."""
+    """The eight registered reports, for the preview tabs and the upload picker.
+
+    Deliberately NOT /api/py/reports/types: FastAPI matches routes in
+    declaration order, so a literal path under /api/py/reports/ is shadowed by
+    the earlier /api/py/reports/{report_id}, which then rejects 'types' as a
+    non-integer with 422. A sibling path avoids the whole class of problem
+    rather than relying on where in this file the route happens to sit."""
     out = []
     for key, e in mapping().get("reportTypes", {}).items():
         out.append({
