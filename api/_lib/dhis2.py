@@ -12,6 +12,15 @@ def base_url():
     return os.environ.get("DHIS2_BASE_URL", "https://hmis.health.go.ug").rstrip("/")
 
 
+def dataset_key(report_type: str) -> str:
+    """Resolve a report type to its data set key via the single table in metadata."""
+    types = mapping().get("reportTypes", {})
+    entry = types.get((report_type or "").upper())
+    if not entry:
+        raise RuntimeError(f"Unknown report type '{report_type}'")
+    return entry["dataSet"]
+
+
 def _session():
     s = requests.Session()
     pat = os.environ.get("DHIS2_PAT", "")
@@ -41,8 +50,7 @@ def preflight(report_type: str = "OPD", org_unit: str = None):
     """Diagnose why a submission might be silently ignored: checks identity,
     data set assignment to the org unit, data write access, capture scope and expiry rules."""
     m = mapping()
-    ds_key = "HMIS105_01" if report_type == "OPD" else "HMIS108"
-    ds_id = m["dataSets"][ds_key]["id"]
+    ds_id = m["dataSets"][dataset_key(report_type)]["id"]
     ou_id = org_unit or m["orgUnit"]["id"]
     s = _session()
     b = base_url()
@@ -131,7 +139,7 @@ def resolve_attribute_option_combo(ds_id: str, session=None):
 
 def build_payload(report_type: str, period: str, data_values: list, org_unit: str = None):
     m = mapping()
-    ds = m["dataSets"]["HMIS105_01" if report_type == "OPD" else "HMIS108"]
+    ds = m["dataSets"][dataset_key(report_type)]
     payload = {
         "dataSet": ds["id"],
         "completeDate": date.today().isoformat(),

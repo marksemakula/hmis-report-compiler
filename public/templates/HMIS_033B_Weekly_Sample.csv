@@ -1,0 +1,32 @@
+Code,Label,Value
+CD01a,"Malaria (Confirmed) - Cases",295
+CD01b,"Malaria (Confirmed) - Deaths",0
+CD02a,"Dysentery - Cases",1
+CD02b,"Dysentery - Deaths",0
+CD03a,"SARI - Cases",0
+CD13a,"Typhoid Fever - Cases",4
+CD13b,"Typhoid Fever - Deaths",0
+CD14a,"Hepatitis B - Cases",14
+CD14b,"Hepatitis B - Deaths",0
+CD20,"Maternal death",0
+CD21,"Macerated Still births",2
+AP01,"OPD New Attendance",412
+AP02,"Total OPD Attendance",1187
+AP03,"Total Deaths",3
+MA01,"Suspected Malaria (Fever)",640
+MA02,"Cases Tested with RDT",512
+MA03,"RDT Positive Cases",243
+MA04,"Cases Tested with Microscopy",128
+MA05,"Microscopy Positive Cases",52
+TB01,"Clients Screened for TB at all entry points",806
+TB02,"Presumptive TB cases identified at all entry points",41
+GP01,"No. of samples tested",23
+GP03,"Total MTB detected",4
+GP06,"No. of GeneXpert modules working",4
+GP07,"No. of catridges remaining",118
+TR01,"Artemether/Lumefantrine 20/120 mg tablet",1250
+TR08,"Malaria Rapid Diagnostic tests",940
+RV01,"Determine HIV 1&2 screening test",600
+TP01,"Number of adult ART clients initiated TPT",7
+CD09a,"Guinea Worm - Cases",
+CD12a,"Plague - Cases",

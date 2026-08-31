@@ -15,6 +15,14 @@ CONSTANTS = {
     "dataSets": {
         "HMIS105_01": {"id": "RtEYsASU7PG", "name": "HMIS 105:01 - OPD Monthly Report (Attendance, Referrals, Conditions, TB, Nutrition)", "periodType": "Monthly"},
         "HMIS108": {"id": "EBqVAQRmiPm", "name": "HMIS 108 - IPD Monthly Report", "periodType": "Monthly"},
+        "HMIS033B": {"id": "C4oUitImBPK", "name": "HMIS 033b - Weekly Epidemiological Surveillance Report", "periodType": "Weekly"},
+    },
+    # Report type -> data set key. Kept here so period rules, payload building
+    # and preflight all resolve the data set the same way.
+    "reportTypes": {
+        "OPD": {"dataSet": "HMIS105_01", "periodType": "Monthly", "label": "eHMIS 105:01 — Outpatient"},
+        "IPD": {"dataSet": "HMIS108", "periodType": "Monthly", "label": "eHMIS 108 — Inpatient"},
+        "SURV": {"dataSet": "HMIS033B", "periodType": "Weekly", "label": "eHMIS 033B — Weekly Surveillance"},
     },
     "keyDataElements": {
         "OA01_newAttendance": "sv6SeKroHPV",
@@ -70,8 +78,12 @@ def _build_code_index(des: dict) -> dict:
     return {c: v[0] for c, v in idx.items() if len(v) == 1}
 
 
-def _fetch_data_elements():
-    """Fetch data element listings for both data sets from the DHIS2 API."""
+def _fetch_data_elements(only=None):
+    """Fetch data element listings for the configured data sets from the DHIS2 API.
+
+    `only` restricts the fetch to the named data set keys, which lets an existing
+    metadata cache be topped up with a newly added report without re-fetching
+    everything."""
     import re
     import requests
 
@@ -90,7 +102,10 @@ def _fetch_data_elements():
             "Set DHIS2_USERNAME and DHIS2_PASSWORD (or DHIS2_PAT) in the Vercel project settings."
         )
     out = {}
+    wanted = set(only) if only else set(CONSTANTS["dataSets"])
     for key, ds in CONSTANTS["dataSets"].items():
+        if key not in wanted:
+            continue
         r = s.get(
             f"{base}/api/dataSets/{ds['id']}.json",
             params={"fields": "id,name,dataSetElements[dataElement[id,name,categoryCombo[id]]]"},
@@ -100,7 +115,11 @@ def _fetch_data_elements():
         des = {}
         for e in r.json().get("dataSetElements", []):
             de = e["dataElement"]
-            m = re.match(r"^(105|108)-([A-Za-z0-9_]+)[\.\s]\s*(.*)$", de["name"])
+            # 033B elements are named inconsistently on the national instance:
+            # both '033B-' and '033b-' appear, and a few omit the full stop
+            # after the code ('033B-CD23e_2019 Other Cases 2'). The character
+            # class accepts a stop or the whitespace that follows the code.
+            m = re.match(r"^(105|108|033[Bb])-([A-Za-z0-9_]+)[\.\s]\s*(.*)$", de["name"])
             des[de["id"]] = {
                 "name": de["name"],
                 "code": m.group(2) if m else None,
@@ -160,8 +179,24 @@ def mapping(force_refresh: bool = False):
             pass
 
     m = dict(CONSTANTS)
+    # A cache written before 033B was supported has no HMIS033B key. Rather
+    # than fail, fetch the missing data sets and fold them in, so an existing
+    # deployment upgrades without an explicit metadata refresh.
+    missing = [k for k in CONSTANTS["dataSets"] if k not in des]
+    if missing:
+        try:
+            fresh = _fetch_data_elements(only=missing)
+            des = {**des, **fresh}
+            try:
+                _save_to_db(des)
+            except Exception:
+                pass
+        except Exception:
+            for k in missing:
+                des.setdefault(k, {})
+
     m["dataElements"] = des
-    m["HMIS105_01_codeIndex"] = _build_code_index(des["HMIS105_01"])
-    m["HMIS108_codeIndex"] = _build_code_index(des["HMIS108"])
+    for key in CONSTANTS["dataSets"]:
+        m[f"{key}_codeIndex"] = _build_code_index(des.get(key, {}))
     _MAPPING = m
     return m

@@ -5,15 +5,48 @@ import { upload as blobUpload } from '@vercel/blob/client';
 
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
+const REPORTS = {
+  OPD:  { label: 'eHMIS 105:01 — Outpatient (OPD)',        cadence: 'monthly' },
+  IPD:  { label: 'eHMIS 108 — Inpatient (IPD)',            cadence: 'monthly' },
+  SURV: { label: 'eHMIS 033B — Weekly Surveillance',       cadence: 'weekly'  },
+};
+
+/* ISO-8601 week number, matching the DHIS2 Weekly period type: weeks start on
+   Monday and week 1 is the week containing 4 January. */
+function isoWeek(d) {
+  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  t.setUTCDate(t.getUTCDate() + 4 - (t.getUTCDay() || 7));
+  const yearStart = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
+  return [t.getUTCFullYear(), Math.ceil(((t - yearStart) / 86400000 + 1) / 7)];
+}
+
+function weeksInYear(y) {
+  return isoWeek(new Date(y, 11, 28))[1];
+}
+
+function weekRange(year, week) {
+  const jan4 = new Date(Date.UTC(year, 0, 4));
+  const monday = new Date(jan4);
+  monday.setUTCDate(jan4.getUTCDate() - ((jan4.getUTCDay() || 7) - 1) + (week - 1) * 7);
+  const sunday = new Date(monday);
+  sunday.setUTCDate(monday.getUTCDate() + 6);
+  const fmt = (d) => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+  return `${fmt(monday)} – ${fmt(sunday)} ${sunday.getUTCFullYear()}`;
+}
+
 export default function Workflow() {
   const router = useRouter();
   const now = new Date();
   const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const lastWeek = new Date(now.getTime() - 7 * 86400000);
+  const [defWeekYear, defWeek] = isoWeek(lastWeek);
 
   const [step, setStep] = useState(0); // 0 upload, 1 validate, 2 compiled, 3 pushed
   const [reportType, setReportType] = useState('OPD');
   const [year, setYear] = useState(prev.getFullYear());
   const [month, setMonth] = useState(prev.getMonth() + 1);
+  const [weekYear, setWeekYear] = useState(defWeekYear);
+  const [week, setWeek] = useState(defWeek);
   const [file, setFile] = useState(null);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -27,7 +60,11 @@ export default function Workflow() {
     fetch('/api/py/auth/me').then((r) => { if (!r.ok) router.push('/login'); });
   }, [router]);
 
-  const period = `${year}${String(month).padStart(2, '0')}`;
+  const weekly = REPORTS[reportType].cadence === 'weekly';
+  const period = weekly ? `${weekYear}W${week}` : `${year}${String(month).padStart(2, '0')}`;
+  const periodLabel = weekly
+    ? `week ${week} of ${weekYear} (${weekRange(weekYear, week)})`
+    : `${MONTHS[month - 1]} ${year}`;
 
   const doUpload = async (e) => {
     e.preventDefault();
@@ -84,7 +121,7 @@ export default function Workflow() {
   };
 
   const doPush = async () => {
-    if (!confirm(`Submit this ${reportType} report for ${MONTHS[month - 1]} ${year} to the national DHIS2? This will write data to hmis.health.go.ug.`)) return;
+    if (!confirm(`Submit this ${REPORTS[reportType].label} report for ${periodLabel} to the national DHIS2? This will write data to hmis.health.go.ug.`)) return;
     setBusy(true); setError('');
     try {
       const r = await fetch('/api/py/push', {
@@ -102,7 +139,7 @@ export default function Workflow() {
 
   return (
     <>
-      <h1>Monthly Report Compilation</h1>
+      <h1>Report Compilation</h1>
       <div className="steps">
         {['1 · Upload', '2 · Validate', '3 · Compile & Preview', '4 · Submit to DHIS2'].map((s, i) => (
           <span key={s} className={`step ${i === step ? 'active' : i < step ? 'done' : ''}`}>{s}</span>
@@ -115,31 +152,61 @@ export default function Workflow() {
         <form className="card" onSubmit={doUpload}>
           <h2>Upload raw data</h2>
           <p style={{ color: 'var(--muted)', marginTop: 0 }}>
-            Provide the register extract as CSV or Excel, following the published template. Download:&nbsp;
+            {weekly
+              ? 'Provide the weekly tally as CSV or Excel with two columns, Code and Value. Leave a cell blank where the indicator was not reported; enter 0 where the true count is zero.'
+              : 'Provide the register extract as CSV or Excel, following the published template.'}
+            &nbsp;Download:&nbsp;
             <a href="/templates/HMIS_105_OPD_Template.csv" download>105 OPD template</a> ·&nbsp;
-            <a href="/templates/HMIS_108_IPD_Template.csv" download>108 IPD template</a>
+            <a href="/templates/HMIS_108_IPD_Template.csv" download>108 IPD template</a> ·&nbsp;
+            <a href="/api/py/templates/033b">033B weekly tally</a>
           </p>
           <div className="grid cols-2">
             <div>
               <label>Report</label>
               <select value={reportType} onChange={(e) => setReportType(e.target.value)}>
-                <option value="OPD">eHMIS 105:01 — Outpatient (OPD)</option>
-                <option value="IPD">eHMIS 108 — Inpatient (IPD)</option>
+                {Object.entries(REPORTS).map(([k, v]) => (
+                  <option key={k} value={k}>{v.label}</option>
+                ))}
               </select>
             </div>
-            <div className="grid cols-2">
-              <div>
-                <label>Month</label>
-                <select value={month} onChange={(e) => setMonth(Number(e.target.value))}>
-                  {MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
-                </select>
+            {weekly ? (
+              <div className="grid cols-2">
+                <div>
+                  <label>Week</label>
+                  <select value={week} onChange={(e) => setWeek(Number(e.target.value))}>
+                    {Array.from({ length: weeksInYear(weekYear) }, (_, i) => i + 1).map((w) => (
+                      <option key={w} value={w}>Week {w}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label>Year</label>
+                  <input type="number" value={weekYear} min="2015" max="2035"
+                         onChange={(e) => {
+                           const y = Number(e.target.value);
+                           setWeekYear(y);
+                           if (week > weeksInYear(y)) setWeek(weeksInYear(y));
+                         }} />
+                </div>
               </div>
-              <div>
-                <label>Year</label>
-                <input type="number" value={year} min="2015" max="2035" onChange={(e) => setYear(Number(e.target.value))} />
+            ) : (
+              <div className="grid cols-2">
+                <div>
+                  <label>Month</label>
+                  <select value={month} onChange={(e) => setMonth(Number(e.target.value))}>
+                    {MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label>Year</label>
+                  <input type="number" value={year} min="2015" max="2035" onChange={(e) => setYear(Number(e.target.value))} />
+                </div>
               </div>
-            </div>
+            )}
           </div>
+          <p style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 0 }}>
+            Reporting period: <strong>{period}</strong> — {periodLabel}
+          </p>
           <div style={{ marginTop: 14 }}>
             <label>Data file (.csv, .xlsx)</label>
             <input type="file" accept=".csv,.xlsx,.xls" onChange={(e) => setFile(e.target.files[0])} required />
@@ -154,16 +221,20 @@ export default function Workflow() {
         <div className="card">
           <h2>Validation results</h2>
           <div className="kpis">
-            <div className="kpi"><div className="n">{upload.rows}</div><div className="l">Rows read</div></div>
-            <div className="kpi"><div className="n">{upload.valid_rows}</div><div className="l">Valid rows</div></div>
-            <div className="kpi"><div className="n">{upload.rows_in_period}</div><div className="l">In {MONTHS[month-1]} {year}</div></div>
-            <div className="kpi"><div className="n" style={{ color: upload.error_count ? 'var(--bad)' : 'var(--ok)' }}>{upload.error_count}</div><div className="l">Rows with errors</div></div>
+            <div className="kpi"><div className="n">{upload.rows}</div><div className="l">{weekly ? 'Lines read' : 'Rows read'}</div></div>
+            <div className="kpi"><div className="n">{upload.valid_rows}</div><div className="l">{weekly ? 'Indicators accepted' : 'Valid rows'}</div></div>
+            <div className="kpi"><div className="n">{upload.rows_in_period}</div><div className="l">{weekly ? 'Values reported' : `In ${periodLabel}`}</div></div>
+            <div className="kpi"><div className="n" style={{ color: upload.error_count ? 'var(--bad)' : 'var(--ok)' }}>{upload.error_count}</div><div className="l">{weekly ? 'Lines with errors' : 'Rows with errors'}</div></div>
           </div>
           {upload.error_count > 0 && (
             <>
-              <div className="alert info">Rows with errors are excluded from compilation. You may proceed, or correct the file and upload it again.</div>
+              <div className="alert info">
+                {weekly
+                  ? 'Lines with errors are excluded. Blank values are not errors — they simply mean the indicator was not reported this week.'
+                  : 'Rows with errors are excluded from compilation. You may proceed, or correct the file and upload it again.'}
+              </div>
               <table>
-                <thead><tr><th>Line</th><th>Patient</th><th>Problems</th></tr></thead>
+                <thead><tr><th>Line</th><th>{weekly ? 'Code' : 'Patient'}</th><th>Problems</th></tr></thead>
                 <tbody>
                   {upload.errors.slice(0, 50).map((e) => (
                     <tr key={e.line}><td>{e.line}</td><td>{e.patient}</td><td>{e.problems.join('; ')}</td></tr>
@@ -183,11 +254,11 @@ export default function Workflow() {
 
       {step === 2 && report && (
         <div className="card">
-          <h2>Compiled report preview — {reportType === 'OPD' ? 'eHMIS 105:01' : 'eHMIS 108'} · {MONTHS[month-1]} {year}</h2>
+          <h2>Compiled report preview — {REPORTS[reportType].label} · {periodLabel}</h2>
           <p style={{ color: 'var(--muted)', marginTop: 0 }}>Facility: {report.facility_name} · {report.compiled_data.length} data values</p>
           {compiled.unmapped?.length > 0 && (
             <div className="alert info">
-              {compiled.unmapped.length} diagnosis code(s) could not be mapped and were excluded:&nbsp;
+              {compiled.unmapped.length} {weekly ? 'code(s)' : 'diagnosis code(s)'} could not be mapped and were excluded:&nbsp;
               {compiled.unmapped.slice(0, 12).map((u) => `${u.code} (${u.records})`).join(', ')}
             </div>
           )}
