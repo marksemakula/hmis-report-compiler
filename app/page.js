@@ -55,6 +55,7 @@ export default function Workflow() {
   const [compiled, setCompiled] = useState(null);
   const [report, setReport] = useState(null);
   const [pushResult, setPushResult] = useState(null);
+  const [dryResult, setDryResult] = useState(null);
 
   useEffect(() => {
     fetch('/api/py/auth/me').then((r) => { if (!r.ok) router.push('/login'); });
@@ -120,22 +121,23 @@ export default function Workflow() {
     } catch (err) { setError(err.message); } finally { setBusy(false); }
   };
 
-  const doPush = async () => {
-    if (!confirm(`Submit this ${REPORTS[reportType].label} report for ${periodLabel} to the national DHIS2? This will write data to hmis.health.go.ug.`)) return;
+  const doPush = async (dryRun = false) => {
+    if (!dryRun && !confirm(`Submit this ${REPORTS[reportType].label} report for ${periodLabel} to the national DHIS2? This will write data to hmis.health.go.ug.`)) return;
     setBusy(true); setError('');
     try {
       const r = await fetch('/api/py/push', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ report_id: compiled.report_id }),
+        body: JSON.stringify({ report_id: compiled.report_id, dry_run: dryRun }),
       });
       const body = await r.json();
-      if (!r.ok) throw new Error(body.detail || 'Submission failed');
+      if (!r.ok) throw new Error(body.detail || (dryRun ? 'Dry run failed' : 'Submission failed'));
+      if (dryRun) { setDryResult(body.result); return; }
       setPushResult(body);
       setStep(3);
     } catch (err) { setError(err.message); } finally { setBusy(false); }
   };
 
-  const reset = () => { setStep(0); setUpload(null); setCompiled(null); setReport(null); setPushResult(null); setFile(null); setError(''); };
+  const reset = () => { setStep(0); setUpload(null); setCompiled(null); setReport(null); setPushResult(null); setDryResult(null); setFile(null); setError(''); };
 
   return (
     <>
@@ -276,9 +278,28 @@ export default function Workflow() {
               </tbody>
             </table>
           </div>
+          {dryResult && (
+            <div className={`alert ${dryResult.accepted ? 'success' : 'error'}`} style={{ marginTop: 14 }}>
+              <strong>Dry run — nothing was written.</strong>{' '}
+              {dryResult.accepted
+                ? `DHIS2 validated all ${report.compiled_data.length} values and would accept this submission `
+                  + `(imported ${dryResult.importCount?.imported ?? 0}, updated ${dryResult.importCount?.updated ?? 0}).`
+                : `DHIS2 would reject or ignore this submission. ${dryResult.description || ''}`}
+              {dryResult.conflicts?.length > 0 && (
+                <ul style={{ marginBottom: 0 }}>
+                  {dryResult.conflicts.slice(0, 8).map((c, i) => (
+                    <li key={i}>{c.object}: {c.value}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
           <div style={{ marginTop: 18, display: 'flex', gap: 10 }}>
             <button className="btn secondary" onClick={reset}>Start again</button>
-            <button className="btn gold" onClick={doPush} disabled={busy}>
+            <button className="btn secondary" onClick={() => doPush(true)} disabled={busy}>
+              {busy ? 'Checking…' : 'Dry run'}
+            </button>
+            <button className="btn gold" onClick={() => doPush(false)} disabled={busy}>
               {busy ? 'Submitting…' : 'Submit to DHIS2'}
             </button>
           </div>

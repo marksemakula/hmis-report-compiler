@@ -242,6 +242,7 @@ def get_report(report_id: int, user: dict = Depends(current_user)):
 
 class PushBody(BaseModel):
     report_id: int
+    dry_run: bool = False
 
 
 @app.post("/api/py/push")
@@ -258,9 +259,20 @@ def push(body: PushBody, user: dict = Depends(current_user)):
         values = json.loads(values)
     try:
         payload = dhis2.build_payload(r["type"], r["period"], values)
-        result = dhis2.submit(payload)
+        result = dhis2.submit(payload, dry_run=body.dry_run)
     except RuntimeError as exc:
         err(str(exc), 503)
+
+    if body.dry_run:
+        # A rehearsal must not be mistaken for a submission: the report's own
+        # status is left untouched so it still reads as awaiting submission.
+        result["dryRun"] = True
+        db.audit(user["sub"], "Dry run against DHIS2", {
+            "report_id": body.report_id, "type": r["type"], "period": r["period"],
+            "result": result,
+        })
+        return {"push_status": "DRY_RUN", "result": result}
+
     status = "PUSHED" if result.get("accepted") else "FAILED"
     with db.get_conn() as conn:
         with conn.cursor() as cur:
