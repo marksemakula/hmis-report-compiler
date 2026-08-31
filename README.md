@@ -4,11 +4,40 @@ A web application that compiles Uganda eHMIS reports — 105:01 (Outpatient, mon
 
 ## Reports
 
-| Report | Data set | Cadence | Period format | Input |
-| --- | --- | --- | --- | --- |
-| eHMIS 105:01 — Outpatient | `RtEYsASU7PG` | Monthly | `YYYYMM` | Line-listed register extract |
-| eHMIS 108 — Inpatient | `EBqVAQRmiPm` | Monthly | `YYYYMM` | Line-listed register extract |
-| eHMIS 033B — Weekly Surveillance | `C4oUitImBPK` | Weekly | `YYYYWnn` | Two-column tally (`Code`, `Value`) |
+All eight are registered and previewable. "Compile" marks those that can be turned into data values and submitted today.
+
+| Key | Report | Data set | Cadence | Period | Compile |
+| --- | --- | --- | --- | --- | --- |
+| `OPD` | HMIS 105:01 — OPD (Attendance, Referrals, Conditions, TB, Nutrition) | `RtEYsASU7PG` | Monthly | `YYYYMM` | yes |
+| `MCH` | HMIS 105:02-03 — OPD (MCH, FP, EID, EPI & HEPB) | `ic1BSWhGOso` | Monthly | `YYYYMM` | — |
+| `HTS` | HMIS 105:04-05 — OPD (HTS & SMC) | `nGkMm2VBT4G` | Monthly | `YYYYMM` | — |
+| `PALL` | HMIS 105C — Palliative Care | `V6TqjXm5sQy` | Monthly | `YYYYMM` | — |
+| `IPD` | HMIS 108 — Inpatient | `EBqVAQRmiPm` | Monthly | `YYYYMM` | yes |
+| `SURV` | HMIS 033b — Weekly Epidemiological Surveillance | `C4oUitImBPK` | Weekly | `YYYYWnn` | yes |
+| `HIV` | HMIS 106a:01-02 — HIV Quarterly | `dFRD2A5fdvn` | Quarterly | `YYYYQn` | — |
+| `TBL` | HMIS 106a:03 — TB/Leprosy Quarterly | `DFMoIONIalm` | Quarterly | `YYYYQn` | — |
+
+## Preview
+
+Every one of the eight data sets uses a **custom** DHIS2 entry form: the Ministry supplies the HTML of the paper form, with one `<input>` per cell identified as `{dataElement}-{categoryOptionCombo}-val` — the same key our compiled data values carry.
+
+The **Preview** tab therefore renders the genuine official form rather than a table of our own devising, with compiled figures dropped into place. Two consequences worth having:
+
+- It looks exactly like the entry screen the QA team already knows, which is what makes it usable for checking a report before submission.
+- When the Ministry revises a form, the preview follows on the next refresh. Nothing transcribes 2,752 data elements by hand.
+
+Access is any signed-in user, **Viewer included**. Viewers get the Preview, Reports and Audit tabs; they cannot upload, compile or submit. A period with no compiled report shows the blank form, so the tab doubles as a reference library of the eight forms.
+
+**Safety.** The form HTML is third-party. At cache time every `<script>`, inline event handler and `javascript:` URL is stripped and every field becomes an inert `<span>`; the document is then served into a `sandbox=""` iframe under a restrictive Content-Security-Policy. Nothing in a form can execute, and no value can be edited. Values are HTML-escaped on injection.
+
+Layouts are cached in Postgres (`form_cache`) because 105:01 alone is over half a megabyte. Admins can re-fetch them with `POST /api/py/forms/refresh`.
+
+## Roadmap
+
+- **Phase 1 — preview and registration.** *Complete.* All eight data sets registered with their official names, cadences and identifiers; the three period formats handled; read-only preview of the official form for every report, open to Viewers.
+- **Phase 2 — the five remaining compilers.** `MCH`, `HTS`, `PALL`, `HIV`, `TBL`. Each needs its own input shape and aggregation rules; `PALL` is smallest at 24 elements and is the sensible first.
+- **Phase 3 — direct ClinicMaster connector.** Replace the CSV round-trip with a query run from the compiler when it is on the hospital network. Note that ClinicMaster runs on **Microsoft SQL Server**, not MySQL — the driver will be `pyodbc` or `pymssql`, and the connection must be read-only and credential-scoped.
+- **Phase 4 — validation and QA.** Cross-check compiled figures against what DHIS2 already holds for the period, and flag variances before submission.
 
 ### A note on 033B
 

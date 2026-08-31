@@ -19,21 +19,27 @@ from _lib.surveillance import (
     SURV_COLUMNS, compile_033b, describe_week, parse_week_period,
     template_csv, validate_surveillance_rows,
 )
-from _lib import dhis2
+from _lib import dhis2, forms, periods
 
-REPORT_TYPES = ("OPD", "IPD", "SURV")
 EXPECTED_COLUMNS = {"OPD": OPD_COLUMNS, "IPD": IPD_COLUMNS, "SURV": SURV_COLUMNS}
 
 
-def check_period(report_type: str, period: str):
-    """Monthly reports use YYYYMM; the weekly surveillance report uses YYYYWnn."""
+def report_type_entry(report_type: str) -> dict:
+    entry = mapping().get("reportTypes", {}).get((report_type or "").upper())
+    if not entry:
+        known = ", ".join(sorted(mapping().get("reportTypes", {})))
+        err(f"Unknown report '{report_type}'. Known reports: {known}", 404)
+    return entry
+
+
+def check_period(report_type: str, period: str) -> str:
+    """Each report carries its own cadence, so the identifier format follows it."""
+    entry = report_type_entry(report_type)
+    pt = entry["periodType"]
     period = (period or "").strip().upper()
-    if report_type == "SURV":
-        if not parse_week_period(period):
-            err("period must be in YYYYWnn format for the weekly surveillance report, "
-                "for example 2026W34")
-    elif not (len(period) == 6 and period.isdigit() and 1 <= int(period[4:]) <= 12):
-        err("period must be in YYYYMM format")
+    if not periods.parse(pt, period):
+        err(f"{entry['short']} is a {pt.lower()} report, so period must be "
+            f"in {periods.FORMAT_HINT.get(pt, pt)}")
     return period
 
 app = FastAPI(title="HMIS Report Compiler", docs_url=None, redoc_url=None)
@@ -107,8 +113,11 @@ def upload(body: UploadBody, user: dict = Depends(current_user)):
     request-body limit on Vercel serverless functions.
     """
     require_role(user, "data_officer")
-    if body.report_type not in REPORT_TYPES:
-        err("report_type must be one of " + ", ".join(REPORT_TYPES))
+    entry = report_type_entry(body.report_type)
+    if not entry.get("compiler"):
+        err(f"{entry['short']} can be previewed but not yet compiled — no compiler "
+            f"has been written for it. Reports that can be compiled today: "
+            + ", ".join(sorted(k for k, v in mapping()["reportTypes"].items() if v.get("compiler"))))
     period = check_period(body.report_type, body.period)
     if not BLOB_URL_RE.match(body.blob_url):
         err("Invalid file reference")
@@ -392,6 +401,7 @@ def meta_refresh(user: dict = Depends(current_user)):
         m = metadata.mapping(force_refresh=True)
         v._IPD_INDEX = None
         surveillance.reset_index()
+        forms.reset_cache()
         counts = {
             "de_105": len(m["dataElements"].get("HMIS105_01", {})),
             "de_108": len(m["dataElements"].get("HMIS108", {})),
@@ -401,6 +411,118 @@ def meta_refresh(user: dict = Depends(current_user)):
         return {"ok": True, **counts}
     except RuntimeError as exc:
         err(str(exc), 503)
+
+
+# ---------------- preview (any signed-in user, including viewers) ----------------
+
+def _latest_report(report_type: str, period: str):
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT id, compiled_data, generated_at, generated_by, push_status
+                   FROM reports WHERE type=%s AND period=%s
+                   ORDER BY id DESC LIMIT 1""",
+                (report_type.upper(), period),
+            )
+            return cur.fetchone()
+
+
+@app.get("/api/py/reports/types")
+def report_types(user: dict = Depends(current_user)):
+    """The eight registered reports, for the preview tabs and the upload picker."""
+    out = []
+    for key, e in mapping().get("reportTypes", {}).items():
+        out.append({
+            "type": key,
+            "short": e["short"],
+            "label": e["label"],
+            "periodType": e["periodType"],
+            "compiler": bool(e.get("compiler")),
+            "defaultPeriod": periods.default_period(e["periodType"]),
+            "formatHint": periods.FORMAT_HINT.get(e["periodType"], ""),
+        })
+    return {"reportTypes": out}
+
+
+@app.get("/api/py/preview/{report_type}/status")
+def preview_status(report_type: str, period: str, user: dict = Depends(current_user)):
+    """Whether a compiled report exists for this report and period. Read-only:
+    available to viewers, who cannot upload, compile or submit."""
+    entry = report_type_entry(report_type)
+    period = check_period(report_type, period)
+    row = None
+    try:
+        row = _latest_report(report_type, period)
+    except Exception:
+        row = None
+    values = (row or {}).get("compiled_data") or []
+    if isinstance(values, str):
+        values = json.loads(values)
+    return {
+        "type": report_type.upper(),
+        "short": entry["short"],
+        "label": entry["label"],
+        "periodType": entry["periodType"],
+        "period": period,
+        "periodLabel": periods.describe(entry["periodType"], period),
+        "compiler": bool(entry.get("compiler")),
+        "report": None if not row else {
+            "id": row["id"],
+            "values": len(values),
+            "generated_at": str(row.get("generated_at") or ""),
+            "generated_by": row.get("generated_by"),
+            "push_status": row.get("push_status"),
+        },
+    }
+
+
+@app.get("/api/py/preview/{report_type}")
+def preview(report_type: str, period: str, user: dict = Depends(current_user)):
+    """The official DHIS2 form for this report, rendered read-only with any
+    compiled values in place. Served as a complete HTML document for a sandboxed
+    iframe — every field is an inert span and no script survives sanitisation."""
+    entry = report_type_entry(report_type)
+    period = check_period(report_type, period)
+
+    row = None
+    try:
+        row = _latest_report(report_type, period)
+    except Exception:
+        row = None
+
+    values = (row or {}).get("compiled_data") or []
+    if isinstance(values, str):
+        values = json.loads(values)
+
+    try:
+        doc = forms.render_document(
+            report_type=report_type.upper(),
+            period=period,
+            period_label=periods.describe(entry["periodType"], period),
+            values=forms.values_map(values),
+            meta={"report_id": (row or {}).get("id"),
+                  "push_status": (row or {}).get("push_status")},
+        )
+    except RuntimeError as exc:
+        err(str(exc), 503)
+    except requests.RequestException as exc:
+        err(f"Could not fetch the official form from DHIS2: {exc}", 502)
+
+    return Response(content=doc, media_type="text/html; charset=utf-8",
+                    headers={"Cache-Control": "no-store",
+                             "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; img-src data:"})
+
+
+@app.post("/api/py/forms/refresh")
+def forms_refresh(user: dict = Depends(current_user)):
+    require_role(user, "admin")
+    forms.reset_cache()
+    try:
+        result = forms.refresh_all()
+    except RuntimeError as exc:
+        err(str(exc), 503)
+    db.audit(user["sub"], "Form layouts refreshed", result)
+    return {"ok": True, "slots": result}
 
 
 @app.get("/api/py/templates/033b")
