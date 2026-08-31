@@ -1,6 +1,28 @@
 # HMIS Report Compiler — Jinja Regional Referral Hospital
 
-A web application that compiles Uganda eHMIS monthly reports — 105:01 (Outpatient) and 108 (Inpatient) — from raw register extracts (CSV/Excel) and submits the aggregated data to the national DHIS2 instance (hmis.health.go.ug) via the dataValueSets API.
+A web application that compiles Uganda eHMIS reports — 105:01 (Outpatient, monthly), 108 (Inpatient, monthly) and 033B (Weekly Epidemiological Surveillance) — from raw register extracts or weekly tallies (CSV/Excel) and submits the aggregated data to the national DHIS2 instance (hmis.health.go.ug) via the dataValueSets API.
+
+## Reports
+
+| Report | Data set | Cadence | Period format | Input |
+| --- | --- | --- | --- | --- |
+| eHMIS 105:01 — Outpatient | `RtEYsASU7PG` | Monthly | `YYYYMM` | Line-listed register extract |
+| eHMIS 108 — Inpatient | `EBqVAQRmiPm` | Monthly | `YYYYMM` | Line-listed register extract |
+| eHMIS 033B — Weekly Surveillance | `C4oUitImBPK` | Weekly | `YYYYWnn` | Two-column tally (`Code`, `Value`) |
+
+### A note on 033B
+
+033B is structurally unlike the other two. All 239 of its data elements sit on the **default** category combination — there is no age or sex disaggregation to compute — so the import is a tally rather than a line list, and compilation is a direct translation from HMIS code to data element.
+
+This matters because a good part of the form cannot come from any register: tracer medicine and ARV stock balances, GeneXpert cartridges remaining and modules working are physical observations. The workflow is therefore:
+
+1. Run `scripts/sql/07_period_extract.sql` against ClinicMaster for the week in question. It emits `Code,Value` rows for everything the EMR can answer.
+2. Export that grid as CSV, open it beside the blank template, and key in the stock and equipment figures the query cannot supply.
+3. Upload, validate, compile, submit.
+
+Two conventions are worth holding on to. A **blank** value means *not reported* and is skipped; a **zero** means *reported as zero*. DHIS2 stores those differently, and conflating them misrepresents the facility. And periods are **ISO-8601** weeks: Monday to Sunday, with week 1 being the week containing 4 January. `DATEPART(week, …)` in SQL Server does not follow ISO — `DATEPART(ISO_WEEK, …)` does, and the extraction script uses it throughout.
+
+The blank 033B template is generated from live DHIS2 metadata at `/api/py/templates/033b` rather than checked in, so it cannot drift from what the national instance will accept.
 
 ## Architecture
 
@@ -41,4 +63,7 @@ pip install -r requirements.txt uvicorn
 npm run fastapi-dev   # FastAPI on :8000
 npm run dev           # Next.js on :3000 (proxies /api/py to :8000)
 python scripts/generate_sample_data.py .   # sample files for testing
+python scripts/test_surveillance.py        # 033B checks — no DB or network needed
 ```
+
+`scripts/test_surveillance.py` stubs the DHIS2 metadata with a fixture that reproduces the national instance's naming inconsistencies (both `033B-` and `033b-` prefixes, and one element whose code is not followed by a full stop), then exercises ISO week handling, tally validation, compilation and template generation. It runs offline in under a second.

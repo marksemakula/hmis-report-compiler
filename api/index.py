@@ -13,9 +13,28 @@ from pydantic import BaseModel
 
 from _lib import db
 from _lib.auth import issue_token, current_user, require_role
-from _lib.validators import parse_file, validate_rows, mapping, OPD_COLUMNS, IPD_COLUMNS, OPD_COLUMNS, IPD_COLUMNS
+from _lib.validators import parse_file, validate_rows, mapping, OPD_COLUMNS, IPD_COLUMNS
 from _lib.compiler import compile_opd, compile_ipd
+from _lib.surveillance import (
+    SURV_COLUMNS, compile_033b, describe_week, parse_week_period,
+    template_csv, validate_surveillance_rows,
+)
 from _lib import dhis2
+
+REPORT_TYPES = ("OPD", "IPD", "SURV")
+EXPECTED_COLUMNS = {"OPD": OPD_COLUMNS, "IPD": IPD_COLUMNS, "SURV": SURV_COLUMNS}
+
+
+def check_period(report_type: str, period: str):
+    """Monthly reports use YYYYMM; the weekly surveillance report uses YYYYWnn."""
+    period = (period or "").strip().upper()
+    if report_type == "SURV":
+        if not parse_week_period(period):
+            err("period must be in YYYYWnn format for the weekly surveillance report, "
+                "for example 2026W34")
+    elif not (len(period) == 6 and period.isdigit() and 1 <= int(period[4:]) <= 12):
+        err("period must be in YYYYMM format")
+    return period
 
 app = FastAPI(title="HMIS Report Compiler", docs_url=None, redoc_url=None)
 
@@ -88,11 +107,9 @@ def upload(body: UploadBody, user: dict = Depends(current_user)):
     request-body limit on Vercel serverless functions.
     """
     require_role(user, "data_officer")
-    if body.report_type not in ("OPD", "IPD"):
-        err("report_type must be OPD or IPD")
-    period = body.period
-    if not (len(period) == 6 and period.isdigit() and 1 <= int(period[4:]) <= 12):
-        err("period must be in YYYYMM format")
+    if body.report_type not in REPORT_TYPES:
+        err("report_type must be one of " + ", ".join(REPORT_TYPES))
+    period = check_period(body.report_type, body.period)
     if not BLOB_URL_RE.match(body.blob_url):
         err("Invalid file reference")
     blob_token = os.environ.get("BLOB_READ_WRITE_TOKEN")
@@ -110,7 +127,7 @@ def upload(body: UploadBody, user: dict = Depends(current_user)):
     content = resp.content
     if len(content) > MAX_UPLOAD_BYTES:
         err("The file exceeds the 25 MB limit")
-    expected = OPD_COLUMNS if body.report_type == "OPD" else IPD_COLUMNS
+    expected = EXPECTED_COLUMNS[body.report_type]
     try:
         rows = parse_file(body.filename, content, expected_columns=expected)
     except Exception as exc:
@@ -118,7 +135,10 @@ def upload(body: UploadBody, user: dict = Depends(current_user)):
     if not rows:
         err("The file contains no data rows. Check that the register was "
             "exported into a sheet whose first row has the template headers.")
-    clean, errors = validate_rows(body.report_type, rows, period)
+    if body.report_type == "SURV":
+        clean, errors = validate_surveillance_rows(rows, period)
+    else:
+        clean, errors = validate_rows(body.report_type, rows, period)
     in_period = sum(1 for r in clean if r["in_period"])
 
     with db.get_conn() as conn:
@@ -166,10 +186,14 @@ def compile_report(body: CompileBody, user: dict = Depends(current_user)):
         rows = json.loads(rows)
     if imp["report_type"] == "OPD":
         values, unmapped = compile_opd(rows, imp["period"])
+    elif imp["report_type"] == "SURV":
+        values, unmapped = compile_033b(rows, imp["period"])
     else:
         values, unmapped = compile_ipd(rows, imp["period"])
     if not values:
-        err("No records fall within the selected reporting period, so there is nothing to compile")
+        err("Nothing to compile: no reported values fall within the selected period. "
+            "For the weekly surveillance report, remember that a blank cell means "
+            "'not reported' and is skipped — enter 0 where the true count is zero.")
 
     m = mapping()
     with db.get_conn() as conn:
@@ -341,6 +365,7 @@ def meta(user: dict = Depends(current_user)):
     return {
         "orgUnit": m["orgUnit"],
         "dataSets": m["dataSets"],
+        "reportTypes": m.get("reportTypes", {}),
         "instance": m["instance"],
         "dhis2_configured": bool(os.environ.get("DHIS2_USERNAME") or os.environ.get("DHIS2_PAT")),
         "db_configured": bool(os.environ.get("DATABASE_URL")),
@@ -350,16 +375,43 @@ def meta(user: dict = Depends(current_user)):
 @app.post("/api/py/meta/refresh")
 def meta_refresh(user: dict = Depends(current_user)):
     require_role(user, "admin")
-    from _lib import validators as v, metadata
+    from _lib import validators as v, metadata, surveillance
     try:
         m = metadata.mapping(force_refresh=True)
         v._IPD_INDEX = None
-        db.audit(user["sub"], "Metadata refreshed", {"de_105": len(m["dataElements"]["HMIS105_01"]),
-                                                     "de_108": len(m["dataElements"]["HMIS108"])})
-        return {"ok": True, "de_105": len(m["dataElements"]["HMIS105_01"]),
-                "de_108": len(m["dataElements"]["HMIS108"])}
+        surveillance.reset_index()
+        counts = {
+            "de_105": len(m["dataElements"].get("HMIS105_01", {})),
+            "de_108": len(m["dataElements"].get("HMIS108", {})),
+            "de_033b": len(m["dataElements"].get("HMIS033B", {})),
+        }
+        db.audit(user["sub"], "Metadata refreshed", counts)
+        return {"ok": True, **counts}
     except RuntimeError as exc:
         err(str(exc), 503)
+
+
+@app.get("/api/py/templates/033b")
+def template_033b(user: dict = Depends(current_user)):
+    """The blank 033B tally, generated from live metadata rather than a checked-in
+    file, so it can never drift from what the national instance will accept."""
+    try:
+        csv_text = template_csv()
+    except RuntimeError as exc:
+        err(str(exc), 503)
+    return Response(
+        content=csv_text,
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="HMIS_033B_Weekly_Template.csv"'},
+    )
+
+
+@app.get("/api/py/period/week")
+def week_label(period: str):
+    """Human-readable date range for a weekly period, for the UI to display."""
+    if not parse_week_period(period):
+        err("period must be in YYYYWnn format, for example 2026W34")
+    return {"period": period.upper(), "label": describe_week(period.upper())}
 
 
 @app.get("/api/py/health")
