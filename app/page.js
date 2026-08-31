@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { upload as blobUpload } from '@vercel/blob/client';
+import { describeError } from './lib';
 
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
@@ -90,7 +91,7 @@ export default function Workflow() {
       try { body = JSON.parse(text); } catch {
         throw new Error(`Upload failed (${r.status}): ${text.slice(0, 200)}`);
       }
-      if (!r.ok) throw new Error(body.detail || body.error || 'Upload failed');
+      if (!r.ok) throw new Error(describeError(r.status, body, 'Upload failed'));
       setUpload(body);
       setStep(1);
     } catch (err) { setError(err.message); } finally {
@@ -113,7 +114,7 @@ export default function Workflow() {
         body: JSON.stringify({ import_id: upload.import_id }),
       });
       const body = await r.json();
-      if (!r.ok) throw new Error(body.detail || 'Compilation failed');
+      if (!r.ok) throw new Error(describeError(r.status, body, 'Compilation failed'));
       setCompiled(body);
       const rr = await fetch(`/api/py/reports/${body.report_id}`);
       setReport(await rr.json());
@@ -130,7 +131,7 @@ export default function Workflow() {
         body: JSON.stringify({ report_id: compiled.report_id, dry_run: dryRun }),
       });
       const body = await r.json();
-      if (!r.ok) throw new Error(body.detail || (dryRun ? 'Dry run failed' : 'Submission failed'));
+      if (!r.ok) throw new Error(describeError(r.status, body, dryRun ? 'Dry run failed' : 'Submission failed'));
       if (dryRun) { setDryResult(body.result); return; }
       setPushResult(body);
       setStep(3);

@@ -236,6 +236,18 @@ def list_reports(user: dict = Depends(current_user)):
             return {"reports": [dict(r) for r in cur.fetchall()]}
 
 
+@app.get("/api/py/reports/types")
+def report_types_alias(user: dict = Depends(current_user)):
+    """Alias for /api/py/report-types.
+
+    MUST stay above /api/py/reports/{report_id}: FastAPI matches in declaration
+    order, and below it this literal path is swallowed by the typed parameter
+    and rejected with 422. It exists so a browser or deployment still holding an
+    older bundle keeps working instead of failing with a validation error that
+    looks nothing like a routing problem."""
+    return report_types(user)
+
+
 @app.get("/api/py/reports/{report_id}")
 def get_report(report_id: int, user: dict = Depends(current_user)):
     with db.get_conn() as conn:

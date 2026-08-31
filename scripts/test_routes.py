@@ -93,6 +93,17 @@ check("preview status is safe alongside preview",
 check("the original bug would have been caught",
       shadows("/api/py/reports/{report_id}", "/api/py/reports/types"), True)
 
+print("\nThe backwards-compatible alias must sit ABOVE the parameterised route")
+order = [p for m, p in routes if m == "GET"]
+if "/api/py/reports/types" in order and "/api/py/reports/{report_id}" in order:
+    check("alias is declared before /api/py/reports/{report_id}",
+          order.index("/api/py/reports/types") < order.index("/api/py/reports/{report_id}"),
+          True)
+else:
+    check("alias and parameterised route both declared",
+          ("/api/py/reports/types" in order, "/api/py/reports/{report_id}" in order),
+          (True, True))
+
 print("\nThe preview endpoints the front end calls must exist")
 declared = {f"{m} {p}" for m, p in routes}
 for wanted in [
