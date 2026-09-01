@@ -95,13 +95,20 @@ for i in range(50):
     })
 upload_values, upload_unmapped = srv.compile_opd(VISITS, "202606")
 
-# Fold the same visits into strata, exactly as the agent would.
-tally = {}
+# Fold the same visits into strata exactly as the extract does: an attendance
+# row per stratum (one per visit) AND a condition row per diagnosis. Keeping
+# them separate is what stops a visit with three conditions from counting as
+# three attendances.
+att, cond = {}, {}
 for v in VISITS:
-    key = (v["diagnosis_code"], srv.opd_band(v["age_years"]), v["sex"], v["visit_type"])
-    tally[key] = tally.get(key, 0) + 1
-strata = [{"diagnosis": d, "band": b, "sex": s, "visit": vt, "n": n}
-          for (d, b, s, vt), n in sorted(tally.items())]
+    b, sx, vt = srv.opd_band(v["age_years"]), v["sex"], v["visit_type"]
+    att[(b, sx, vt)] = att.get((b, sx, vt), 0) + 1
+    key = (v["diagnosis_code"], b, sx, vt)
+    cond[key] = cond.get(key, 0) + 1
+strata = ([{"diagnosis": agentlib.ATTENDANCE_SENTINEL, "band": b, "sex": s, "visit": vt, "n": n}
+           for (b, s, vt), n in sorted(att.items())]
+          + [{"diagnosis": d, "band": b, "sex": s, "visit": vt, "n": n}
+             for (d, b, s, vt), n in sorted(cond.items())])
 rows = agentlib.strata_to_rows(agentlib.validate_strata(strata))
 agent_values, agent_unmapped = srv.compile_opd_strata(rows, "202606")
 
@@ -110,7 +117,11 @@ def as_dict(values):
     return {(v["dataElement"], v["categoryOptionCombo"]): v["value"] for v in values}
 
 
-check("strata are fewer than visits", len(strata) < len(VISITS), True)
+check("attendance strata reconstruct the visit count",
+      sum(r["n"] for r in strata if r["diagnosis"] == agentlib.ATTENDANCE_SENTINEL),
+      len(VISITS))
+check("attendance rows are marked, condition rows are not",
+      sorted({r["count_attendance"] for r in rows}), [False, True])
 check("same number of data values", len(agent_values), len(upload_values))
 check("every value identical", as_dict(agent_values), as_dict(upload_values))
 check("unmapped identical", agent_unmapped, upload_unmapped)
@@ -164,7 +175,23 @@ print("\nSummary arithmetic")
 s = agentlib.summarise(agentlib.validate_strata(strata))
 check("visits summed", s["visits"], len(VISITS))
 check("new plus re equals total", s["new"] + s["re"], s["visits"])
-check("distinct diagnoses", s["diagnoses"], 3)
+check("distinct diagnoses, sentinel excluded", s["diagnoses"], 3)
+check("conditions counted separately from visits", s["conditions"], len(VISITS))
+
+print("\nA visit with several conditions is still one attendance")
+multi = agentlib.strata_to_rows(agentlib.validate_strata([
+    {"diagnosis": agentlib.ATTENDANCE_SENTINEL, "band": "20+Yrs", "sex": "Male", "visit": "New", "n": 10},
+    {"diagnosis": "EP01c", "band": "20+Yrs", "sex": "Male", "visit": "New", "n": 10},
+    {"diagnosis": "MH26",  "band": "20+Yrs", "sex": "Male", "visit": "New", "n": 7},
+    {"diagnosis": "XX01",  "band": "20+Yrs", "sex": "Male", "visit": "New", "n": 4},
+]))
+vals, _ = srv.compile_opd_strata(multi, "202606")
+att_total = sum(int(v["value"]) for v in vals
+                if v["dataElement"] == metadata.CONSTANTS["keyDataElements"]["OA01_newAttendance"])
+cond_total = sum(int(v["value"]) for v in vals
+                 if v["dataElement"] != metadata.CONSTANTS["keyDataElements"]["OA01_newAttendance"])
+check("10 visits, 21 conditions -> attendance stays 10", att_total, 10)
+check("...and the conditions all count", cond_total, 21)
 
 print("\nQueries must be read-only")
 for sql, ok in [

@@ -144,10 +144,13 @@ def compile_opd_strata(rows: list, period: str):
             unmapped[f"{coc_name} (unknown age band or sex)"] += weight
             continue
 
+        # A row is either an attendance row or a condition row, never both:
+        # a visit with three conditions is one attendance and three diagnoses.
         if r.get("count_attendance", True):
             att_de = m["keyDataElements"]["OA01_newAttendance"] if r["visit_type"] == "New" \
                 else m["keyDataElements"]["OA02_reAttendance"]
             counts[(att_de, att_coc)] += weight
+            continue
 
         raw = str(r.get("diagnosis_code") or "").strip()
         code = map_diagnosis(raw, code_index) if raw else ""

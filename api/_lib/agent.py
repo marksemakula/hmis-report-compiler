@@ -58,6 +58,13 @@ MAX_COUNT = 10_000_000
 
 STRATUM_KEYS = {"diagnosis", "band", "sex", "visit", "n"}
 
+# Extracts carry two grains in one file. A row whose diagnosis is this sentinel
+# counts VISITS (one per visit, for OA01/OA02); every other row counts
+# DIAGNOSES, of which a single visit may contribute several. Keeping them in one
+# file keeps the upload a single artefact; keeping them distinguishable keeps
+# attendance from being multiplied by the number of conditions recorded.
+ATTENDANCE_SENTINEL = "(attendance)"
+
 # Fields that must never appear in a payload. Their presence means the agent
 # is sending patient-level data, which is a defect in the agent rather than
 # something to quietly accept and store.
@@ -201,13 +208,20 @@ def validate_strata(payload) -> list:
 
 
 def summarise(strata: list) -> dict:
-    """Totals for the audit trail and the UI, computed once on ingestion."""
+    """Totals for the audit trail and the UI.
+
+    Visits and diagnoses are counted from their own rows. Summing every n would
+    double-count, because an extract carries both grains: one attendance row per
+    visit plus one row per condition recorded at it."""
+    att = [s for s in strata if s["diagnosis"] == ATTENDANCE_SENTINEL]
+    cond = [s for s in strata if s["diagnosis"] != ATTENDANCE_SENTINEL]
     return {
         "strata": len(strata),
-        "visits": sum(s["n"] for s in strata),
-        "new": sum(s["n"] for s in strata if s["visit"] == "New"),
-        "re": sum(s["n"] for s in strata if s["visit"] == "Re"),
-        "diagnoses": len({s["diagnosis"] for s in strata}),
+        "visits": sum(s["n"] for s in att),
+        "new": sum(s["n"] for s in att if s["visit"] == "New"),
+        "re": sum(s["n"] for s in att if s["visit"] == "Re"),
+        "conditions": sum(s["n"] for s in cond),
+        "diagnoses": len({s["diagnosis"] for s in cond}),
     }
 
 
@@ -271,11 +285,18 @@ def strata_to_rows(strata: list) -> list:
     One row per stratum carrying its count, rather than n duplicated rows: the
     compiler is adjusted to honour a weight, which keeps a 40,000-visit month
     to a few hundred rows instead of forty thousand."""
-    return [{
-        "diagnosis_code": s["diagnosis"],
-        "age_band": s["band"],
-        "sex": s["sex"],
-        "visit_type": s["visit"],
-        "weight": s["n"],
-        "in_period": True,
-    } for s in strata]
+    rows = []
+    for s in strata:
+        is_attendance = s["diagnosis"] == ATTENDANCE_SENTINEL
+        rows.append({
+            # An attendance row carries no condition, so it must not also be
+            # tallied against a data element.
+            "diagnosis_code": "" if is_attendance else s["diagnosis"],
+            "age_band": s["band"],
+            "sex": s["sex"],
+            "visit_type": s["visit"],
+            "weight": s["n"],
+            "count_attendance": is_attendance,
+            "in_period": True,
+        })
+    return rows

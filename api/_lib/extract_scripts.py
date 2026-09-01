@@ -35,7 +35,14 @@ BAND_RULES = [
     (999.0, "20+Yrs"),
 ]
 
-RE_ATTENDANCE = ["Follow up", "RTT - Return To Treatment", "Represented", "CDDP"]
+# ClinicMaster codes sex as 15F / 15M / 15N, not Male / Female. An earlier
+# version of these scripts matched on the words and would have discarded every
+# visit as "no recognised sex", writing an empty file. Confirmed 25 Aug 2026:
+# 15F 143,326 · 15M 82,267 · 15N 31.
+SEX_CODES = {"15F": "Female", "15M": "Male"}
+
+# The row that carries visit counts rather than a condition.
+ATTENDANCE_SENTINEL = "(attendance)"
 
 DATABASE = "ClinicMasterMOH"
 DEFAULT_SERVER = "172.20.0.230"
@@ -69,22 +76,32 @@ UTILITIES = {
 
 
 def opd_sql(start: date, end_exclusive: date) -> str:
-    """Read-only aggregate over Visits and Patients for one period.
+    """Read-only aggregate for HMIS 105:01, one period.
 
-    New versus re-attendance follows the Ministry definition, not ClinicMaster's
-    visit category: a client's FIRST visit within the reporting period is a new
-    attendance and every later visit in the same period is a re-attendance. The
-    category field records why they came, which is a different question — a
-    client can be categorised "Consultation" twice in one month and still be one
-    new attendance and one re-attendance.
+    Confirmed against the live schema on 25 August 2026:
 
-    The dates are literals rather than parameters: they come from a validated
-    period, never from user input, and inlining them means the same SQL text
-    works unchanged under .NET and Python.
+      * Diagnosis has no VisitNo. It uses ClinicMaster's polymorphic pattern —
+        ObjectName names the parent entity ('Visits', 'Admissions', 'IPDDoctor',
+        'Deaths') and TreatmentNo is the key into it. OPD diagnoses are those
+        with ObjectName = 'Visits'.
+      * Diagnosis.VisitType carries exactly two values, 'Out Patient' and
+        'In Patient'. That is the OPD/IPD discriminator the front end shows as
+        two separate tables.
+      * GenderID is coded '15F' / '15M' / '15N', NOT 'Male' / 'Female'.
+      * Diseases.DiseaseCode is a genuine ICD-11 stem for 16,917 of 18,036
+        entries. Join on the CODE, never the name: Diagnosis holds 7,452
+        distinct names against only 5,679 distinct codes, so the names have
+        drifted and would split a single condition across several rows.
 
-    Age is taken at the visit date, not today. Birth dates before 1900-01-02 are
-    ClinicMaster's blank-date placeholder and are excluded rather than banded as
-    126-year-olds."""
+    Two grains come back in one result, distinguished by the diagnosis column:
+
+      * rows where diagnosis = '(attendance)' count VISITS — one per visit,
+        for OA01/OA02
+      * every other row counts DIAGNOSES — a visit with three conditions
+        recorded contributes three, which is what the Ministry asks for
+
+    New versus re-attendance follows the Ministry rule: a client's first visit
+    in the period is new, later visits are re-attendances."""
     return f"""WITH v AS (
     SELECT  vv.VisitNo,
             vv.PatientNo,
@@ -94,20 +111,34 @@ def opd_sql(start: date, end_exclusive: date) -> str:
     FROM    {DATABASE}.dbo.Visits vv
     WHERE   vv.VisitDate >= '{start.isoformat()}'
       AND   vv.VisitDate <  '{end_exclusive.isoformat()}'
+      AND   ISNULL(vv.VisitStatusID, '') <> '9IP'   -- exclude inpatient episodes
+), b AS (
+    SELECT  v.VisitNo,
+            CASE WHEN p.BirthDate IS NULL OR p.BirthDate < '1900-01-02' THEN NULL
+                 ELSE DATEDIFF(day, p.BirthDate, v.VisitDate) / 365.25 END AS age_years,
+            p.GenderID                                             AS sex,
+            CASE WHEN v.seq_in_period = 1 THEN 'New' ELSE 'Re' END  AS visit_category
+    FROM    v
+    JOIN    {DATABASE}.dbo.Patients p ON p.PatientNo = v.PatientNo
 )
-SELECT
-    CASE WHEN p.BirthDate IS NULL OR p.BirthDate < '1900-01-02' THEN NULL
-         ELSE DATEDIFF(day, p.BirthDate, v.VisitDate) / 365.25 END AS age_years,
-    p.GenderID                                                     AS sex,
-    CASE WHEN v.seq_in_period = 1 THEN 'New' ELSE 'Re' END          AS visit_category,
-    COUNT(*)                                                       AS n
-FROM v
-JOIN {DATABASE}.dbo.Patients p ON p.PatientNo = v.PatientNo
-GROUP BY
-    CASE WHEN p.BirthDate IS NULL OR p.BirthDate < '1900-01-02' THEN NULL
-         ELSE DATEDIFF(day, p.BirthDate, v.VisitDate) / 365.25 END,
-    p.GenderID,
-    CASE WHEN v.seq_in_period = 1 THEN 'New' ELSE 'Re' END"""
+SELECT  b.age_years, b.sex, b.visit_category,
+        '(attendance)'  AS diagnosis,
+        COUNT(*)        AS n
+FROM    b
+GROUP BY b.age_years, b.sex, b.visit_category
+
+UNION ALL
+
+SELECT  b.age_years, b.sex, b.visit_category,
+        d.DiseaseCode   AS diagnosis,
+        COUNT(*)        AS n
+FROM    b
+JOIN    {DATABASE}.dbo.Diagnosis d
+     ON d.TreatmentNo = b.VisitNo
+    AND d.ObjectName  = 'Visits'
+    AND d.VisitType   = 'Out Patient'
+WHERE   d.DiseaseCode IS NOT NULL
+GROUP BY b.age_years, b.sex, b.visit_category, d.DiseaseCode"""
 
 
 def profile_sql() -> str:
@@ -240,8 +271,6 @@ function Get-Band([double]$Years) {{
     return "20+Yrs"
 }}
 
-$ReAttendance = @({re_ps})
-
 Write-Host "Connecting to $Server ..."
 $conn = New-Object System.Data.SqlClient.SqlConnection
 $conn.ConnectionString = "Server=$Server;Database=$Database;User ID=$User;Password=$Plain;TrustServerCertificate=True;Connect Timeout=20"
@@ -255,24 +284,25 @@ $tally = @{{}}
 $skippedAge = 0
 $skippedSex = 0
 
+# ClinicMaster codes sex as 15F / 15M / 15N. Matching on the words "Male" and
+# "Female" would discard every row.
+$SexCodes = @{{ {sex_ps} }}
+
 while ($reader.Read()) {{
     $n = [int]$reader["n"]
     if ($n -le 0) {{ continue }}
     if ($reader["age_years"] -eq [DBNull]::Value) {{ $skippedAge += $n; continue }}
 
-    $rawSex = [string]$reader["sex"]
-    $sex = switch -regex ($rawSex.Trim().ToLower()) {{
-        '^(f|female)$' {{ "Female"; break }}
-        '^(m|male)$'   {{ "Male";   break }}
-        default        {{ $null }}
-    }}
+    $sex = $SexCodes[([string]$reader["sex"]).Trim()]
     if (-not $sex) {{ $skippedSex += $n; continue }}
 
-    $band = Get-Band ([double]$reader["age_years"])
-    $cat  = ([string]$reader["visit_category"]).Trim()
-    $visit = if ($ReAttendance -contains $cat) {{ "Re" }} else {{ "New" }}
+    $band  = Get-Band ([double]$reader["age_years"])
+    # New / Re already decided in SQL by first visit in the period.
+    $visit = ([string]$reader["visit_category"]).Trim()
+    $diag  = ([string]$reader["diagnosis"]).Trim()
+    if (-not $diag) {{ $diag = "(no diagnosis code)" }}
 
-    $key = "$band|$sex|$visit"
+    $key = "$diag|$band|$sex|$visit"
     if ($tally.ContainsKey($key)) {{ $tally[$key] += $n }} else {{ $tally[$key] = $n }}
 }}
 $reader.Close(); $conn.Close()
@@ -280,10 +310,10 @@ $reader.Close(); $conn.Close()
 $rows = foreach ($k in ($tally.Keys | Sort-Object)) {{
     $p = $k -split '\|'
     [PSCustomObject]@{{
-        diagnosis = "{diagnosis_placeholder}"
-        band      = $p[0]
-        sex       = $p[1]
-        visit     = $p[2]
+        diagnosis = $p[0]
+        band      = $p[1]
+        sex       = $p[2]
+        visit     = $p[3]
         n         = $tally[$k]
     }}
 }}
@@ -331,7 +361,7 @@ SQL = """{sql}"""
 BANDS = [
 {band_py}
 ]
-RE_ATTENDANCE = {{{re_py}}}
+SEX_CODES = {{{sex_py}}}
 
 
 def band(years):
@@ -378,20 +408,20 @@ def main():
     cur.execute(SQL)
 
     tally, skipped_age, skipped_sex = {{}}, 0, 0
-    for age_years, sex, category, n in cur.fetchall():
+    for age_years, sex_code, visit, diagnosis, n in cur.fetchall():
         n = int(n or 0)
         if n <= 0:
             continue
         if age_years is None:
             skipped_age += n
             continue
-        s = str(sex or "").strip().lower()
-        sex_norm = "Female" if s in ("f", "female") else "Male" if s in ("m", "male") else None
-        if not sex_norm:
+        sex = SEX_CODES.get(str(sex_code or "").strip())
+        if not sex:
             skipped_sex += n
             continue
-        visit = "Re" if str(category or "").strip() in RE_ATTENDANCE else "New"
-        key = (band(float(age_years)), sex_norm, visit)
+        # New / Re already decided in SQL by first visit in the period.
+        key = (str(diagnosis or "(no diagnosis code)").strip(),
+               band(float(age_years)), sex, str(visit or "New").strip())
         tally[key] = tally.get(key, 0) + n
 
     cur.close()
@@ -400,8 +430,8 @@ def main():
     with open(args.out, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["diagnosis", "band", "sex", "visit", "n"])
-        for (b, s, v), n in sorted(tally.items()):
-            w.writerow(["{diagnosis_placeholder}", b, s, v, n])
+        for (d, b, s, v), n in sorted(tally.items()):
+            w.writerow([d, b, s, v, n])
 
     total = sum(tally.values())
     print(f"\nWrote {{args.out}}")
@@ -587,10 +617,6 @@ def generate(report_type: str, period: str, os_key: str, period_type: str,
         "output": output_name(report_type, period),
         "script": script_name(report_type, period, os_key),
         "sql": sql,
-        # Until the Diagnosis and Diseases columns are confirmed the script
-        # extracts attendance only, and labels every stratum so the compiled
-        # report cannot be mistaken for a complete one.
-        "diagnosis_placeholder": "(attendance only)",
     }
 
     if os_key == "windows":
@@ -600,13 +626,13 @@ def generate(report_type: str, period: str, os_key: str, period_type: str,
             for limit, label in BAND_RULES[:-1])
         text = POWERSHELL.format(
             band_ps=band_ps,
-            re_ps=", ".join(f'"{c}"' for c in RE_ATTENDANCE),
+            sex_ps="; ".join(f'"{k}" = "{v}"' for k, v in SEX_CODES.items()),
             **common)
     else:
         band_py = "\n".join(f"    ({limit!r}, {label!r})," for limit, label in BAND_RULES)
         text = PYTHON.format(
             band_py=band_py,
-            re_py=", ".join(repr(c) for c in RE_ATTENDANCE),
+            sex_py=", ".join(f"{k!r}: {v!r}" for k, v in SEX_CODES.items()),
             **common)
 
     return common["script"], text

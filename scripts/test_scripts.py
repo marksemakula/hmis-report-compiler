@@ -79,8 +79,10 @@ exec(compile(made["linux"][1].replace('if __name__ == "__main__":\n    main()', 
 ages = [0, 1 / 365, 28 / 365, 29 / 365, 1, 4.99, 5, 9.99, 10, 19.99, 20, 45, 130]
 check(f"{len(ages)} ages band identically",
       [a for a in ages if ns["band"](a) != srv.opd_band(a)], [])
-check("generated re-attendance set matches",
-      ns["RE_ATTENDANCE"], set(gen.RE_ATTENDANCE))
+check("generated sex map uses ClinicMaster's codes",
+      ns["SEX_CODES"], gen.SEX_CODES)
+check("15F is Female, 15M is Male",
+      (ns["SEX_CODES"].get("15F"), ns["SEX_CODES"].get("15M")), ("Female", "Male"))
 
 print("\nPowerShell shape")
 ps = made["windows"][1]
@@ -91,8 +93,9 @@ check("password is not a plain parameter default", 'param(\n    [string]$Passwor
 check("writes CSV", "Export-Csv" in ps, True)
 check("every band label appears",
       all(label in ps for _, label in gen.BAND_RULES), True)
-check("re-attendance categories appear",
-      all(c in ps for c in gen.RE_ATTENDANCE), True)
+check("sex codes appear", all(c in ps for c in gen.SEX_CODES), True)
+check("does not match on the words Male/Female",
+      "'^(f|female)$'" in ps, False)
 
 print("\nThe SQL must be read-only and aggregate")
 sql = gen.opd_sql(date(2026, 6, 1), date(2026, 7, 1))
@@ -109,15 +112,26 @@ check("the visit category no longer decides attendance",
 outer = sql.split(")\nSELECT", 1)[1] if ")\nSELECT" in sql else sql[sql.index("SELECT"):]
 select_list = outer[:outer.index("FROM")]
 returned = re.findall(r"AS\s+(\w+)", select_list)
-check("returns exactly four aggregate columns", returned,
-      ["age_years", "sex", "visit_category", "n"])
+check("returns the aggregate columns only", returned, ["diagnosis", "n"])
 check("nothing identifying is returned",
       [c for c in returned if re.search(
           r"name|patient|clinic|nationalid|birth|phone|address|visitno", c, re.I)], [])
-check("BirthDate is read but not returned",
-      ("BirthDate" in select_list, "BirthDate" in " ".join(returned)), (True, False))
 check("PatientNo is never returned", "PatientNo" in select_list, False)
+check("BirthDate is read to derive an age but never returned",
+      ("BirthDate" in sql, "BirthDate" in " ".join(returned)), (True, False))
 check("counts", "COUNT(*)" in sql, True)
+
+print("\nThe confirmed ClinicMaster schema, as of 25 August 2026")
+check("OPD diagnoses only", "d.VisitType   = 'Out Patient'" in sql, True)
+check("polymorphic parent pinned to Visits", "d.ObjectName  = 'Visits'" in sql, True)
+check("joins Diagnosis on TreatmentNo, since it has no VisitNo",
+      "d.TreatmentNo = b.VisitNo" in sql, True)
+check("joins on the ICD-11 code, not the drifting name",
+      ("d.DiseaseCode" in sql, "DiseaseName" in sql), (True, False))
+check("inpatient episodes excluded from OPD attendance", "'9IP'" in sql, True)
+check("two grains: attendance rows and condition rows",
+      sql.count("UNION ALL"), 1)
+check("attendance sentinel present", "'(attendance)'" in sql, True)
 
 print("\nRefusals")
 def refuses(fn, fragment):
