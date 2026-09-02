@@ -97,9 +97,15 @@ print("\nThe two compile paths must agree exactly")
 # string can mean both.
 #
 # ICD-11 codes taken from api/_lib/icd11_hmis_map.json, generated from Jinja's
-# own Diseases table: 1C61 is malaria, 8A60 is epilepsy.
+# own Diseases table: 1F40 is falciparum malaria, 8A60 is epilepsy.
+#
+# This fixture first used 1C61, which the table did then map to malaria. It is
+# not malaria: it is "HIV disease clinical stage 1 associated with malaria", and
+# it was being classified by the co-morbidity named in passing rather than by
+# its subject. Widening the HIV policy rule removed it from the malaria mapping
+# and broke this test, which is the test doing its job.
 DIAGNOSIS_PAIRS = [
-    ("EP01c", "1C61"),      # malaria
+    ("EP01c", "1F40"),      # malaria due to Plasmodium falciparum
     ("MH33", "8A60"),       # epilepsy
     ("QQ99", "ZZ99"),       # neither side maps: both must reach All others
 ]

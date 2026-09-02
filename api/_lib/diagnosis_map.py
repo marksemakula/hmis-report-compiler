@@ -23,7 +23,13 @@ HIV_CODE = "OP01"
 TB_CODE = "OP01"
 
 POLICY_RULES = [
-    (r"\bHIV DISEASE\b|\bHIV/?AIDS\b|RETROVIRAL DISEASE", HIV_CODE),
+    # The spelled-out form matters. ClinicMaster's dictionary carries both
+    # "HIV DISEASE CLINICAL STAGE 1 ..." and "HUMAN IMMUNODEFICIENCY VIRUS
+    # DISEASE ASSOCIATED WITH MALARIA". Matching only the abbreviation sent the
+    # second down the clinical rules, where the incidental mention of malaria
+    # caught it and it was reported as a confirmed malaria case. A record is
+    # classified by its subject, not by a co-morbidity named in passing.
+    (r"\bHIV\b|HUMAN IMMUNODEFICIENCY VIRUS|RETROVIRAL DISEASE", HIV_CODE),
     (r"\bTUBERCULOSIS\b|\bTB\b(?! )|PULMONARY TB", TB_CODE),
 ]
 

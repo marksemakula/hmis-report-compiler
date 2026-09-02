@@ -256,3 +256,39 @@ check("surrounding whitespace is ignored",
 check("every stored key is already in normal form",
       [k for k in dmap.icd11_map() if k != dmap.normalise_code(k)], [])
 check("blank normalises to blank", dmap.normalise_code(None), "")
+
+print("\nA record is classified by its subject, not a co-morbidity in passing")
+# ClinicMaster's dictionary spells HIV both ways. Matching only "HIV DISEASE"
+# sent "HUMAN IMMUNODEFICIENCY VIRUS DISEASE ASSOCIATED WITH MALARIA" down the
+# clinical rules, where MALARIA caught it and it was reported to the Ministry
+# as a confirmed malaria case.
+import importlib  # noqa: E402
+
+
+def _classify_name(name):
+    """What the generator would make of a disease name."""
+    upper = name.upper()
+    for rx, code in dmap._POLICY:
+        if rx.search(upper):
+            return code
+    for rx, code in dmap._EMR:
+        if rx.search(upper):
+            return code
+    return None
+
+
+for name in [
+    "HIV DISEASE CLINICAL STAGE 1 WITHOUT MENTION OF TUBERCULOSIS",
+    "HUMAN IMMUNODEFICIENCY VIRUS DISEASE ASSOCIATED WITH MALARIA",
+    "HIV DISEASE CLINICAL STAGE 1 ASSOCIATED WITH MALARIA",
+    "HUMAN IMMUNODEFICIENCY VIRUS DISEASE WITHOUT MENTION OF TUBERCULOSIS",
+]:
+    check(f"HIV record not filed as its co-morbidity: {name[:44]}",
+          _classify_name(name), dmap.HIV_CODE)
+
+check("a genuine malaria record is still malaria",
+      _classify_name("MALARIA DUE TO PLASMODIUM FALCIPARUM"), "EP01c")
+check("...including the unspecified form",
+      _classify_name("MALARIA, UNSPECIFIED"), "EP01c")
+check("no HIV-named code survives in the table as a malaria mapping",
+      [k for k, v in dmap.icd11_map().items() if v == "EP01c" and k.startswith("1C6")], [])
