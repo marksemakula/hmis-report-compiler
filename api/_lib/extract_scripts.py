@@ -51,6 +51,12 @@ OS_CHOICES = {
     "windows": {"label": "Microsoft Windows", "ext": "ps1", "runtime": "PowerShell"},
     "macos":   {"label": "macOS",             "ext": "py",  "runtime": "Python 3"},
     "linux":   {"label": "Linux",             "ext": "py",  "runtime": "Python 3"},
+    # No interpreter, no driver, no install. The query is run in whatever SQL
+    # client is already working on the machine and the grid saved as CSV. This
+    # exists because pymssql on macOS is a genuine obstacle, while Azure Data
+    # Studio is already connected to this server and proven.
+    "sql":     {"label": "SQL only (Azure Data Studio)", "ext": "sql",
+                "runtime": "your existing SQL client"},
 }
 
 # Reports a script can be generated for. Others are upload-only for now, and
@@ -157,6 +163,82 @@ JOIN    {DATABASE}.dbo.Diagnosis d
     AND d.VisitType   = 'Out Patient'
 WHERE   d.DiseaseCode IS NOT NULL
 GROUP BY b.age_years, b.sex, b.visit_category, d.DiseaseCode"""
+
+
+def _band_case(col: str) -> str:
+    """The age-band CASE, generated from BAND_RULES so it cannot drift from the
+    Python and the compiler.
+
+    The first band is inclusive at its upper bound and the rest are exclusive,
+    exactly as compiler.opd_band does: a child of exactly 28 days is a neonate,
+    a child of exactly five years is not a four-year-old."""
+    lines = []
+    for i, (limit, label) in enumerate(BAND_RULES[:-1]):
+        op = "<=" if i == 0 else "<"
+        lines.append(f"             WHEN {col} {op} {limit!r} THEN '{label}'")
+    lines.append(f"             ELSE '{BAND_RULES[-1][1]}'")
+    return "CASE\n" + "\n".join(lines) + "\n        END"
+
+
+def opd_strata_sql(start: date, end_exclusive: date) -> str:
+    """HMIS 105:01 as the five upload columns, computed entirely in SQL.
+
+    The Python and PowerShell scripts do the age banding and sex mapping after
+    the query, because that is easier to read. This variant does it in T-SQL so
+    the result can be run in Azure Data Studio and the grid saved straight to
+    CSV, with no driver to install and no interpreter involved.
+
+    That matters more than it sounds. A hospital machine that already has a
+    working SQL client is a solved problem; a hospital machine that needs
+    pymssql compiled against FreeTDS is an afternoon. The columns below are
+    exactly strata_columns(), so looks_like_strata() recognises the upload with
+    no special case.
+
+    Rows whose age or sex cannot be resolved are dropped here rather than
+    silently banded, matching what the scripts do: a visit with no usable date
+    of birth is not a visit in the 0-28 day column."""
+    band = _band_case("b.age_years")
+    sexes = ", ".join(f"('{code}', '{name}')" for code, name in SEX_CODES.items())
+    return f"""WITH v AS (
+    SELECT  vv.VisitNo,
+            vv.PatientNo,
+            vv.VisitDate,
+            ROW_NUMBER() OVER (PARTITION BY vv.PatientNo ORDER BY vv.VisitDate, vv.VisitNo)
+                AS seq_in_period
+    FROM    {DATABASE}.dbo.Visits vv
+    WHERE   vv.VisitDate >= '{start.isoformat()}'
+      AND   vv.VisitDate <  '{end_exclusive.isoformat()}'
+      AND   ISNULL(vv.VisitStatusID, '') <> '9IP'
+), b AS (
+    SELECT  v.VisitNo,
+            CASE WHEN p.BirthDate IS NULL OR p.BirthDate < '1900-01-02' THEN NULL
+                 ELSE CAST(DATEDIFF(day, p.BirthDate, v.VisitDate) AS float) / 365.25
+            END                                                    AS age_years,
+            p.GenderID                                             AS sex_code,
+            CASE WHEN v.seq_in_period = 1 THEN 'New' ELSE 'Re' END  AS visit
+    FROM    v
+    JOIN    {DATABASE}.dbo.Patients p ON p.PatientNo = v.PatientNo
+), s AS (
+    SELECT  b.VisitNo, b.visit, sx.name AS sex,
+            {band} AS band
+    FROM    b
+    JOIN    (VALUES {sexes}) AS sx(code, name) ON sx.code = b.sex_code
+    WHERE   b.age_years IS NOT NULL
+)
+SELECT  '{ATTENDANCE_SENTINEL}' AS diagnosis, s.band, s.sex, s.visit, COUNT(*) AS n
+FROM    s
+GROUP BY s.band, s.sex, s.visit
+
+UNION ALL
+
+SELECT  d.DiseaseCode AS diagnosis, s.band, s.sex, s.visit, COUNT(*) AS n
+FROM    s
+JOIN    {DATABASE}.dbo.Diagnosis d
+     ON d.TreatmentNo = s.VisitNo
+    AND d.ObjectName  = 'Visits'
+    AND d.VisitType   = 'Out Patient'
+WHERE   d.DiseaseCode IS NOT NULL
+GROUP BY d.DiseaseCode, s.band, s.sex, s.visit"""
 
 
 def profile_sql() -> str:
@@ -826,6 +908,40 @@ def generate(report_type: str, period: str, os_key: str, period_type: str,
         raise ValueError(f"{period!r} is not a valid {period_type.lower()} period")
     start, end = span
     end_exclusive = date.fromordinal(end.toordinal() + 1)
+
+    if os_key == "sql":
+        name = script_name(report_type, period, os_key)
+        body = (surv_sql(start, end_exclusive) if report_type == "SURV"
+                else opd_strata_sql(start, end_exclusive))
+        cols = ("Code, Value" if report_type == "SURV"
+                else ", ".join(strata_columns()))
+        return name, f"""/* ==================================================================
+   JRRH {report_label} - {describe(period_type, period)}
+   Generated {date.today().isoformat()} for period {period}
+   ------------------------------------------------------------------
+   Run this in Azure Data Studio, or any SQL client already connected
+   to {server}, against {DATABASE}. It needs no
+   interpreter and no driver.
+
+   Then: right-click the results grid, Save as CSV, and upload that
+   file on the Compile page. The columns it returns ({cols})
+   are exactly what the upload expects, so nothing needs renaming.
+
+   GIVE THE FILE ITS OWN NAME when you save it. Azure Data Studio
+   reuses Results.csv, and a stale Results.csv from an earlier query
+   has twice been uploaded by mistake and taken a round trip to spot.
+
+   The period is fixed in the query below. To extract a different one,
+   download that period from the Extraction Scripts page rather than
+   editing the dates here - the compiler checks the period you select
+   against the file you upload.
+
+   Read-only: this SELECTs and groups. It writes nothing, and it
+   returns counts, never a patient row.
+   ================================================================== */
+
+{body};
+"""
 
     # 033B is a tally, not a line-listed register: its script returns a
     # two-column Code/Value grid and needs no age banding or sex mapping, so it

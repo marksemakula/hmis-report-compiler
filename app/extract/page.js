@@ -95,9 +95,17 @@ export default function ExtractScripts() {
             PowerShell queries SQL Server through .NET, so nothing needs installing.
           </p>
         )}
-        {osKey !== 'windows' && (
+        {osKey === 'sql' && (
           <p style={{ color: 'var(--muted)', fontSize: 12.5, marginBottom: 0 }}>
-            Needs Python 3 and a driver: <code>pip install pymssql</code>
+            A plain .sql file for a client you already have open. Nothing to install,
+            no interpreter, no driver. Run it, then save the results grid as CSV.
+          </p>
+        )}
+        {(osKey === 'macos' || osKey === 'linux') && (
+          <p style={{ color: 'var(--muted)', fontSize: 12.5, marginBottom: 0 }}>
+            Needs Python 3 and a driver: <code>pip3 install pymssql</code>. If that
+            will not install, choose <strong>SQL only</strong> instead - it needs
+            neither.
           </p>
         )}
       </div>
@@ -213,15 +221,34 @@ export default function ExtractScripts() {
         )}
         <div style={{ marginTop: 18, fontSize: 13.5 }}>
           <strong>Then, on the hospital network:</strong>
-          <pre style={{ background: 'var(--pale, #E8F1F1)', padding: 12, borderRadius: 8,
-                        overflowX: 'auto', marginTop: 8 }}>
+          {osKey === 'sql' ? (
+            <>
+              <ol style={{ marginTop: 8, paddingLeft: 20 }}>
+                <li>Open the downloaded <code>.sql</code> file in Azure Data Studio,
+                    connected to {options?.server || '172.20.0.230'}.</li>
+                <li>Run it. It returns one grid.</li>
+                <li>Right-click the grid, <strong>Save as CSV</strong>, and give the file
+                    its own name - Azure Data Studio reuses <code>Results.csv</code>,
+                    which is how a stale file gets uploaded twice.</li>
+                <li>Upload that CSV on the Compile page, choosing the same report
+                    and period.</li>
+              </ol>
+              The columns come back ready to upload; nothing needs renaming.
+            </>
+          ) : (
+            <>
+              <pre style={{ background: 'var(--pale, #E8F1F1)', padding: 12, borderRadius: 8,
+                            overflowX: 'auto', marginTop: 8 }}>
 {osKey === 'windows'
   ? `.\\jrrh_extract_${report.toLowerCase()}_${period}.ps1 -User readonly_user`
   : `python3 jrrh_extract_${report.toLowerCase()}_${period}.py --user readonly_user`}
-          </pre>
-          It asks for the password, writes <code>JRRH_{report}_{period}_strata.csv</code>,
-          and tells you how many visits it found. Upload that file on the Compile page,
-          choosing the same report and period.
+              </pre>
+              It asks for the password, writes <code>JRRH_{report}_{period}_strata.csv</code>,
+              and tells you how many visits it found. Upload that file on the Compile page,
+              choosing the same report and period. Leave <code>--user</code> off and it
+              will ask for the login too.
+            </>
+          )}
         </div>
         <div className="alert info" style={{ marginTop: 16 }}>
           You need a <strong>read-only</strong> SQL login on ClinicMaster. Do not use an

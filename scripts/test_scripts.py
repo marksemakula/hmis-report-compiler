@@ -332,3 +332,77 @@ _, ps = gen.generate("OPD", "202607", "windows", "Monthly", "105:01")
 check("windows: password is a secure string", "-AsSecureString" in ps, True)
 check("windows: a missing login prompts rather than aborts",
       "Mandatory=$true)][string]$User" in ps, True)
+
+
+# ---------------------------------------------------------------------------
+# The SQL-only download, added 3 September 2026.
+#
+# Reported from a real run on macOS: the script prompted correctly, then
+#
+#     No SQL Server driver found. Install one:  pip install pymssql
+#
+# pymssql on macOS is a genuine obstacle, and the machine in question already
+# had Azure Data Studio connected to this very server. So there is now a third
+# choice that skips the interpreter entirely: a .sql file whose grid saves
+# straight to a CSV the compiler accepts.
+#
+# The risk it introduces is drift. Age banding now exists in four places -
+# compiler.py, the Python template, the PowerShell template and this SQL - so
+# the CASE is generated from BAND_RULES and checked against the compiler here.
+# ---------------------------------------------------------------------------
+print("\nSQL-only download")
+sname, ssql = gen.generate("OPD", "202607", "sql", "Monthly", "105:01")
+check("filename ends .sql", sname.endswith(".sql"), True)
+check("names the period", "202607" in sname, True)
+check("carries instructions for a person, not just a query",
+      "Save as CSV" in ssql, True)
+check("warns about Azure Data Studio reusing Results.csv",
+      "Results.csv" in ssql, True)
+check("returns the exact upload columns",
+      all(c in ssql for c in gen.strata_columns()), True)
+check("period is baked in", "'2026-07-01'" in ssql and "'2026-08-01'" in ssql, True)
+check("no neighbouring month leaks in",
+      any(d in ssql for d in ("2026-06-01", "2026-09-01")), False)
+for word in ("INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "EXEC"):
+    check(f"read-only: no {word}", re.search(rf"\b{word}\b", ssql, re.I) is not None, False)
+
+print("\nThe SQL must band exactly as the compiler does")
+# Read the thresholds back out of the generated SQL and apply them in Python,
+# so this compares what will actually run rather than what was intended.
+_case = re.findall(r"WHEN b\.age_years (<=?) ([0-9.]+) THEN '([^']+)'", ssql)
+check("four thresholds plus an ELSE", len(_case), len(gen.BAND_RULES) - 1)
+
+
+def _sql_band(age):
+    for op, lim, label in _case:
+        lim = float(lim)
+        if (age <= lim) if op == "<=" else (age < lim):
+            return label
+    return gen.BAND_RULES[-1][1]
+
+
+_ages = [0, 1 / 365, 27 / 365, 28 / 365, 28.0001 / 365, 29 / 365, 0.5, 1, 4.999,
+         5, 5.001, 9.999, 10, 15, 19.999, 20, 20.001, 45, 80, 130]
+check(f"{len(_ages)} ages band identically to compiler.opd_band",
+      [a for a in _ages if _sql_band(a) != srv.opd_band(a)], [])
+check("the neonatal band is inclusive at 28 days, as the compiler has it",
+      (_sql_band(28 / 365), srv.opd_band(28 / 365)), ("0-28Dys", "0-28Dys"))
+check("exactly five years is not a four-year-old", _sql_band(5.0), "5-9Yrs")
+check("sex codes come from the one table",
+      all(f"'{c}', '{n}'" in ssql for c, n in gen.SEX_CODES.items()), True)
+check("the attendance sentinel matches the ingestion's",
+      f"'{gen.ATTENDANCE_SENTINEL}'" in ssql, True)
+check("a file of these columns is recognised on upload",
+      gen.looks_like_strata(gen.strata_columns()), True)
+
+print("\n033B needs no banding, so its SQL download is the tally query itself")
+wname, wsql = gen.generate("SURV", "2026W35", "sql", "Weekly", "033B")
+check("filename ends .sql", wname.endswith(".sql"), True)
+check("returns Code and Value", "Code, Value" in wsql, True)
+check("the week is baked in", "'2026-08-24'" in wsql, True)
+
+print("\nEvery platform choice still produces something runnable")
+for os_key in gen.OS_CHOICES:
+    n, t = gen.generate("OPD", "202607", os_key, "Monthly", "105:01")
+    check(f"{os_key}: produces a file", (n.endswith(gen.OS_CHOICES[os_key]["ext"]),
+                                         len(t) > 500), (True, True))
