@@ -1,18 +1,11 @@
 'use client';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { apiGet } from '../lib';
+import { apiGet, weeksInYear, weekLabel } from '../lib';
 
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
 /* ISO-8601 week number, matching the DHIS2 Weekly period type. */
-function isoWeek(d) {
-  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
-  t.setUTCDate(t.getUTCDate() + 4 - (t.getUTCDay() || 7));
-  const yearStart = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
-  return [t.getUTCFullYear(), Math.ceil(((t - yearStart) / 86400000 + 1) / 7)];
-}
-const weeksInYear = (y) => isoWeek(new Date(y, 11, 28))[1];
 
 /* Split a DHIS2 period identifier into its year and ordinal parts. */
 function splitPeriod(periodType, period) {
@@ -74,7 +67,7 @@ export default function Preview() {
   const ordinalOptions = () => {
     if (!current) return [];
     if (current.periodType === 'Weekly')
-      return Array.from({ length: weeksInYear(year) }, (_, i) => [i + 1, `Week ${i + 1}`]);
+      return Array.from({ length: weeksInYear(year) }, (_, i) => [i + 1, weekLabel(year, i + 1)]);
     if (current.periodType === 'Quarterly')
       return [1, 2, 3, 4].map((q) => [q, `Q${q}`]);
     return MONTHS.map((m, i) => [i + 1, m]);

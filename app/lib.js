@@ -74,3 +74,52 @@ export async function apiGet(url, fallback) {
   }
   return body;
 }
+
+/* ------------------------------------------------------------------ periods
+ *
+ * ISO-8601 week arithmetic, shared by the Compile, Preview and Extraction
+ * Scripts pages. It lived in all three as separate copies, which is three
+ * places to fix and three places to drift; a week mislabelled on one page and
+ * not another is exactly the sort of discrepancy nobody reports and everybody
+ * distrusts.
+ *
+ * These must agree exactly with api/_lib/periods.py, which uses Python's
+ * date.fromisocalendar. scripts/test_client.mjs checks all 1,096 weeks from
+ * 2015 to 2035 against a table generated from it.
+ */
+
+/** [isoYear, isoWeek] for a Date. The ISO year is not always the calendar one. */
+export function isoWeek(d) {
+  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  t.setUTCDate(t.getUTCDate() + 4 - (t.getUTCDay() || 7));
+  const yearStart = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
+  return [t.getUTCFullYear(), Math.ceil(((t - yearStart) / 86400000 + 1) / 7)];
+}
+
+/** 52 or 53. Some years genuinely have 53 ISO weeks; 2026 is one. */
+export function weeksInYear(y) {
+  return isoWeek(new Date(y, 11, 28))[1];
+}
+
+/**
+ * The Monday opening ISO week `week` of `year`.
+ *
+ * ISO-8601 anchors week 1 on the week containing 4 January, so a year's first
+ * week can begin in the previous December — week 1 of 2026 starts on
+ * 29 December 2025. A picker that hid that would mislabel every week in January.
+ */
+export function isoWeekMonday(year, week) {
+  const jan4 = new Date(Date.UTC(year, 0, 4));
+  const dow = jan4.getUTCDay() || 7;                 // Monday = 1 … Sunday = 7
+  return new Date(Date.UTC(year, 0, 4 - (dow - 1)) + (week - 1) * 604800000);
+}
+
+/** "Week 35 (2026-08-24 - 2026-08-30)". The end is the Sunday, inclusive: the
+ *  query's exclusive bound is the Monday after, and showing that reads as an
+ *  extra day. */
+export function weekLabel(year, week) {
+  const monday = isoWeekMonday(year, week);
+  const sunday = new Date(monday.getTime() + 6 * 86400000);
+  const ymd = (d) => d.toISOString().slice(0, 10);
+  return `Week ${week} (${ymd(monday)} - ${ymd(sunday)})`;
+}

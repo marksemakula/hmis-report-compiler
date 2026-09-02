@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { upload as blobUpload } from '@vercel/blob/client';
-import { describeError } from './lib';
+import { describeError, isoWeek, isoWeekMonday, weeksInYear, weekLabel } from './lib';
 
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
@@ -12,25 +12,13 @@ const REPORTS = {
   SURV: { label: 'eHMIS 033B — Weekly Surveillance',       cadence: 'weekly'  },
 };
 
-/* ISO-8601 week number, matching the DHIS2 Weekly period type: weeks start on
-   Monday and week 1 is the week containing 4 January. */
-function isoWeek(d) {
-  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
-  t.setUTCDate(t.getUTCDate() + 4 - (t.getUTCDay() || 7));
-  const yearStart = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
-  return [t.getUTCFullYear(), Math.ceil(((t - yearStart) / 86400000 + 1) / 7)];
-}
-
-function weeksInYear(y) {
-  return isoWeek(new Date(y, 11, 28))[1];
-}
-
+/* The same week, worded for a sentence rather than a dropdown: "24 Aug –
+   30 Aug 2026" reads better inside "Submit this report for …" than the ISO
+   form does. Two presentations, one arithmetic — isoWeekMonday in app/lib.js,
+   checked against the server for every week from 2015 to 2035. */
 function weekRange(year, week) {
-  const jan4 = new Date(Date.UTC(year, 0, 4));
-  const monday = new Date(jan4);
-  monday.setUTCDate(jan4.getUTCDate() - ((jan4.getUTCDay() || 7) - 1) + (week - 1) * 7);
-  const sunday = new Date(monday);
-  sunday.setUTCDate(monday.getUTCDate() + 6);
+  const monday = isoWeekMonday(year, week);
+  const sunday = new Date(monday.getTime() + 6 * 86400000);
   const fmt = (d) => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
   return `${fmt(monday)} – ${fmt(sunday)} ${sunday.getUTCFullYear()}`;
 }
@@ -235,7 +223,7 @@ export default function Workflow() {
                   <label>Week</label>
                   <select value={week} onChange={(e) => setWeek(Number(e.target.value))}>
                     {Array.from({ length: weeksInYear(weekYear) }, (_, i) => i + 1).map((w) => (
-                      <option key={w} value={w}>Week {w}</option>
+                      <option key={w} value={w}>{weekLabel(weekYear, w)}</option>
                     ))}
                   </select>
                 </div>
