@@ -98,6 +98,11 @@ tr:hover td { background: #f8fafb; }
 .alert.error { background: #f8e4e4; color: var(--bad); }
 .alert.success { background: #e2f2e8; color: var(--ok); }
 .alert.info { background: #e7eef6; color: var(--navy-2); }
+/* Consistency findings on an uploaded tally. 'warn' is a figure that is
+   possible but has previously only ever been a fault; 'error' is one that
+   cannot be true. Both appear above the Compile button, so they are read
+   while the numbers are still a file rather than a submission. */
+.alert.warn { background: #fbf1de; color: var(--warn); }
 
 .kpis { display: flex; gap: 1rem; flex-wrap: wrap; margin: .6rem 0 1rem; }
 .kpi { background: #f2f5f8; border-radius: 8px; padding: .7rem 1.1rem; min-width: 130px; }

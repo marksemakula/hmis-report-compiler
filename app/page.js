@@ -345,6 +345,18 @@ export default function Workflow() {
             <div className="kpi"><div className="n">{upload.rows_in_period}</div><div className="l">{weekly ? 'Values reported' : `In ${periodLabel}`}</div></div>
             <div className="kpi"><div className="n" style={{ color: upload.error_count ? 'var(--bad)' : 'var(--ok)' }}>{upload.error_count}</div><div className="l">{weekly ? 'Lines with errors' : 'Rows with errors'}</div></div>
           </div>
+          {/* Arithmetic the form implies but cannot enforce. Shown before the
+              Compile button, because a figure that cannot be true is worth
+              questioning while it is still a file rather than a submission. */}
+          {upload.consistency?.length > 0 && (
+            <div style={{ marginTop: 14 }}>
+              {upload.consistency.map((c, i) => (
+                <div key={i} className={`alert ${c.severity === 'error' ? 'error' : 'warn'}`}>
+                  <b>{c.severity === 'error' ? 'Cannot be right' : 'Worth checking'}</b> — {c.message}
+                </div>
+              ))}
+            </div>
+          )}
           {upload.error_count > 0 && (
             <>
               <div className="alert info">

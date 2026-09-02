@@ -17,8 +17,8 @@ from _lib.validators import parse_file, validate_rows, mapping, OPD_COLUMNS, IPD
 from _lib.compiler import compile_opd, compile_ipd, compile_opd_strata
 from _lib import agent as agentlib
 from _lib.surveillance import (
-    SURV_COLUMNS, compile_033b, describe_week, parse_week_period,
-    template_csv, validate_surveillance_rows,
+    SURV_COLUMNS, check_consistency, compile_033b, describe_week,
+    parse_week_period, template_csv, validate_surveillance_rows,
 )
 from _lib import coverage, dhis2, extract_scripts, forms, periods
 
@@ -149,8 +149,13 @@ def upload(body: UploadBody, user: dict = Depends(current_user)):
     # counts by diagnosis, age band, sex and visit type. Recognised by its
     # columns rather than its name, so a renamed file still works.
     source = "UPLOAD"
+    context, consistency = {}, []
     if body.report_type == "SURV":
-        clean, errors = validate_surveillance_rows(rows, period)
+        clean, errors, context = validate_surveillance_rows(rows, period)
+        # Arithmetic the form implies but cannot enforce. Surfaced at upload,
+        # while the figures can still be questioned, rather than after they
+        # have been submitted to the national instance.
+        consistency = check_consistency(clean, context)
     elif extract_scripts.looks_like_strata(rows[0].keys() if rows else None):
         try:
             strata = agentlib.validate_strata([
@@ -188,6 +193,10 @@ def upload(body: UploadBody, user: dict = Depends(current_user)):
         "rows_in_period": in_period,
         "errors": errors[:200],
         "error_count": len(errors),
+        # Extract metadata (the period actually covered, tests ordered against
+        # tests resulted) and the consistency findings drawn from it.
+        "context": context,
+        "consistency": consistency,
     }
 
 

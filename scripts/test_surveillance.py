@@ -92,7 +92,7 @@ rows = [
     {"Code": "CD23e_2019", "Value": "-2"},    # negative
     {"Code": "CD01b", "Value": "3.5"},        # not a whole number
 ]
-clean, errors = s.validate_surveillance_rows(rows, "2026W35")
+clean, errors, context = s.validate_surveillance_rows(rows, "2026W35")
 check("clean rows", len(clean), 4)
 check("error rows", len(errors), 4)
 check("value normalised", [c["value"] for c in clean if c["code"] == "TR01"], [1250])
@@ -106,7 +106,7 @@ check("negative reported",
 check("fractional reported",
       any("whole number" in p for e in errors for p in e["problems"]), True)
 
-bad_clean, bad_errors = s.validate_surveillance_rows(rows, "202608")
+bad_clean, bad_errors, _ = s.validate_surveillance_rows(rows, "202608")
 check("monthly period refused outright", (len(bad_clean), len(bad_errors)), (0, 1))
 
 print("\nCompilation")
@@ -150,3 +150,105 @@ if failures:
         print("  - " + f)
     sys.exit(1)
 print("All checks passed.")
+
+
+# ---------------------------------------------------------------------------
+# Extract metadata and consistency, added 3 September 2026.
+#
+# Every figure below is real. They are the successive week-35 outputs from
+# scripts/sql/07_period_extract.sql as its faults were found and fixed, so
+# these checks fail on exactly the numbers that were nearly submitted.
+# ---------------------------------------------------------------------------
+print("\nExtract metadata rows are carried, not rejected")
+meta_rows = [
+    {"Code": "_days_covered", "Value": "7"},
+    {"Code": "_start_yyyymmdd", "Value": "20260824"},
+    {"Code": "_req_rdt", "Value": "173"},
+    {"Code": "_req_smear", "Value": "199"},
+    {"Code": "_rejectedid_54N", "Value": "2319"},
+    # Two real tally codes, so the check proves metadata is filtered out
+    # WITHOUT the tally itself being disturbed. They come from this file's
+    # fixture index, not from the live instance.
+    {"Code": "CD01a", "Value": "295"},
+    {"Code": "CD01b", "Value": "4"},
+]
+mclean, merrors, mcontext = s.validate_surveillance_rows(meta_rows, "2026W35")
+check("metadata rows raise no errors", merrors, [])
+check("metadata rows are not compiled as tally codes", len(mclean), 2)
+check("metadata is carried through", mcontext.get("_req_rdt"), "173")
+check("the covered period is available for audit", mcontext.get("_days_covered"), "7")
+check("a non-numeric metadata value is still carried",
+      s.validate_surveillance_rows([{"Code": "_note", "Value": "partial week"}],
+                                   "2026W35")[2], {"_note": "partial week"})
+
+print("\nConsistency: the figures that were nearly submitted")
+
+
+def findings(pairs, ctx=None):
+    rows = [{"code": c, "value": v} for c, v in pairs]
+    return s.check_consistency(rows, ctx or {})
+
+
+def has(fs, fragment, severity=None):
+    return any(fragment in f["message"] and (severity is None or f["severity"] == severity)
+               for f in fs)
+
+# The first week-35 run: AP01 identical to AP02 because the visit-category
+# filter matched codes it never contained.
+f = findings([("AP01", 3619), ("AP02", 3619)])
+check("every attendance counted as new is flagged",
+      has(f, "every attendance is counted as new", "warning"), True)
+
+# ...and the corrected run must be silent.
+f = findings([("AP01", 3170), ("AP02", 3619)])
+check("the corrected attendance figures pass", f, [])
+
+# GeneXpert: 21 of 21 rejected, because RejectedID is never blank.
+f = findings([("GP01", 21), ("GP02", 21)])
+check("every sample counted as rejected is flagged",
+      has(f, "every GeneXpert sample is counted as rejected", "warning"), True)
+
+# 173 rapid tests ordered, none resulted: reporting 173 tested would have
+# claimed a week with no positive rapid test in Jinja in August.
+f = findings([("MA02", 0), ("MA03", 0)], {"_req_rdt": "173"})
+check("ordered but never resulted is an error when nothing resulted",
+      has(f, "none was resulted", "error"), True)
+
+# 199 smears ordered, 88 resulted: reporting 199 halves the positivity.
+f = findings([("MA04", 88), ("MA05", 18)], {"_req_smear": "199"})
+check("a partial resulting rate is a warning, not an error",
+      has(f, "111 were ordered but never resulted", "warning"), True)
+check("...and it does not also raise an error",
+      [x for x in f if x["severity"] == "error"], [])
+
+print("\nConsistency: arithmetic that cannot be true")
+check("more RDT positives than RDTs tested",
+      has(findings([("MA02", 10), ("MA03", 11)]), "cannot exceed", "error"), True)
+check("more smear positives than smears tested",
+      has(findings([("MA04", 88), ("MA05", 89)]), "cannot exceed", "error"), True)
+check("more rifampicin resistance than MTB detections",
+      has(findings([("GP03", 1), ("GP04", 2)]), "rifampicin", "error"), True)
+check("detections plus errors exceeding samples tested",
+      has(findings([("GP01", 6), ("GP03", 4), ("GP05", 3)]), "cannot exceed", "error"), True)
+check("more new attendances than total",
+      has(findings([("AP01", 4000), ("AP02", 3619)]), "cannot exceed", "error"), True)
+check("more deaths than attendances",
+      has(findings([("AP03", 5000), ("AP02", 3619)]), "deaths", "error"), True)
+check("more positives treated than positives",
+      has(findings([("MA03", 2), ("MA08", 5)]), "cannot exceed", "error"), True)
+
+print("\nConsistency stays quiet when it should")
+check("the full corrected week 35 passes clean",
+      findings([("AP01", 3170), ("AP02", 3619), ("MA02", 0), ("MA03", 0),
+                ("MA04", 88), ("MA05", 18), ("GP01", 6), ("GP02", 0),
+                ("GP03", 1), ("GP04", 0), ("GP05", 0)],
+               {"_req_rdt": "0", "_req_smear": "88", "_req_xpert": "6"}), [])
+check("a rule with no data is not applied", findings([("MA03", 5)]), [])
+check("zero on both sides of an equality warning is not flagged",
+      findings([("AP01", 0), ("AP02", 0)]), [])
+check("equal figures are allowed where no rule names them",
+      findings([("MA04", 88), ("MA05", 88)]), [])
+check("no rows at all", s.check_consistency([], {}), [])
+check("None context", s.check_consistency([{"code": "AP01", "value": 1}], None), [])
+check("non-numeric metadata is ignored by the ordered check",
+      findings([("MA04", 88)], {"_req_smear": "many"}), [])

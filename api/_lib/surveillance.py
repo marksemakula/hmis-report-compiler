@@ -75,14 +75,91 @@ def _clean_value(raw):
     return int(num), None
 
 
+METADATA_PREFIX = "_"
+
+# Relationships the form itself implies. Each is (left codes, right codes,
+# message): the sum of the left may not exceed the sum of the right.
+#
+# These exist because three weeks of this report were compiled from figures
+# that were internally impossible and nobody could see it. Week 35 of 2026 was
+# reported with 3,619 new attendances out of 3,619 total, 21 GeneXpert samples
+# rejected out of 21 tested, and 173 rapid tests conducted with no result of
+# any kind. Every one of those is arithmetic a person would catch in a moment
+# and a spreadsheet never will.
+SUBSET_RULES = [
+    (["MA03"], ["MA02"], "RDT positives cannot exceed the RDTs tested"),
+    (["MA05"], ["MA04"], "microscopy positives cannot exceed the smears tested"),
+    (["MA08"], ["MA03"], "RDT positives treated cannot exceed RDT positives"),
+    (["MA10"], ["MA05"], "microscopy positives treated cannot exceed microscopy positives"),
+    (["MA07"], ["MA02"], "RDT negatives treated cannot exceed the RDTs tested"),
+    (["MA09"], ["MA04"], "microscopy negatives treated cannot exceed the smears tested"),
+    (["GP03", "GP05"], ["GP01"],
+     "samples detected plus errors cannot exceed the samples tested"),
+    (["GP04"], ["GP03"], "rifampicin resistance cannot exceed the MTB detections"),
+    (["AP01"], ["AP02"], "new attendances cannot exceed total attendance"),
+    (["AP03"], ["AP02"], "deaths cannot exceed total attendance"),
+]
+
+# Two figures being exactly equal is not impossible, but in this report it has
+# so far always meant a filter that matched nothing. Warnings, not errors.
+EQUALITY_WARNINGS = [
+    ("AP01", "AP02", "every attendance is counted as new — check the "
+                     "new-versus-repeat rule for the period"),
+    ("GP02", "GP01", "every GeneXpert sample is counted as rejected — check "
+                     "the rejection code"),
+]
+
+
+def check_consistency(clean_rows: list, context: dict = None) -> list:
+    """Arithmetic the form implies but cannot enforce. Returns a list of
+    {severity, message}: 'error' for a figure that cannot be true, 'warning'
+    for one that is possible but has previously only ever been a bug."""
+    got = {r["code"].upper(): r["value"] for r in clean_rows or []}
+    out = []
+
+    for left, right, why in SUBSET_RULES:
+        if not any(c in got for c in left) or not all(c in got for c in right):
+            continue
+        lsum = sum(got.get(c, 0) for c in left)
+        rsum = sum(got[c] for c in right)
+        if lsum > rsum:
+            out.append({"severity": "error",
+                        "message": f"{'+'.join(left)} is {lsum} but {'+'.join(right)} "
+                                   f"is {rsum}: {why}."})
+
+    for a, b, why in EQUALITY_WARNINGS:
+        if a in got and b in got and got[a] == got[b] and got[b] > 0:
+            out.append({"severity": "warning",
+                        "message": f"{a} equals {b} at {got[b]}: {why}."})
+
+    # Ordered against resulted, where the extract recorded both. A test ordered
+    # and never resulted was not a test, and reporting it as one overstates the
+    # denominator and halves the positivity.
+    for code, meta, what in (("MA02", "_req_rdt", "rapid tests"),
+                             ("MA04", "_req_smear", "smears"),
+                             ("GP01", "_req_xpert", "GeneXpert samples")):
+        ordered = (context or {}).get(meta)
+        if code not in got or not str(ordered or "").strip().isdigit():
+            continue
+        ordered = int(ordered)
+        if ordered > got[code]:
+            gap = ordered - got[code]
+            sev = "warning" if got[code] else "error"
+            tail = ("none was resulted, so nothing can be reported for this week"
+                    if not got[code] else f"{gap} were ordered but never resulted")
+            out.append({"severity": sev,
+                        "message": f"{ordered} {what} ordered, {got[code]} resulted: {tail}."})
+    return out
+
+
 def validate_surveillance_rows(rows: list, period: str):
-    """Validate a 033B tally. Returns (clean_rows, errors)."""
+    """Validate a 033B tally. Returns (clean_rows, errors, context)."""
     index = surveillance_index()
-    errors, clean, seen = [], [], {}
+    errors, clean, seen, context = [], [], {}, {}
 
     if not parse_week_period(period):
         return [], [{"line": 1, "patient": "", "problems": [
-            f"'{period}' is not a valid weekly period. Use YYYYWnn, for example 2026W34."]}]
+            f"'{period}' is not a valid weekly period. Use YYYYWnn, for example 2026W34."]}], {}
 
     for i, row in enumerate(rows, start=2):  # header is line 1
         row = {str(k).strip(): v for k, v in row.items() if k}
@@ -92,6 +169,17 @@ def validate_surveillance_rows(rows: list, period: str):
 
         if not code_raw:
             continue  # a blank code line is padding, not an error
+
+        # Rows whose code begins with an underscore are extract metadata, not
+        # tally codes: the period the extract actually covered, and how many
+        # tests were ordered against how many were resulted. The extraction
+        # script emits them so that a figure can be audited after the fact.
+        # They must be carried, not rejected — reported as unknown codes they
+        # look like a data fault, and the obvious response is to delete the
+        # very rows that explain the numbers.
+        if code_raw.startswith(METADATA_PREFIX):
+            context[code_raw] = str(value_raw).strip()
+            continue
 
         code_norm = re.sub(r"\s+", "", code_raw).upper()
         # Tolerate the full element name being pasted in, e.g. '033B-CD01a'
@@ -120,7 +208,7 @@ def validate_surveillance_rows(rows: list, period: str):
             "value": value,
             "in_period": True,
         })
-    return clean, errors
+    return clean, errors, context
 
 
 def compile_033b(rows: list, period: str):
