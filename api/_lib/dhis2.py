@@ -145,6 +145,18 @@ def build_payload(report_type: str, period: str, data_values: list, org_unit: st
         "completeDate": date.today().isoformat(),
         "period": period,
         "orgUnit": org_unit or m["orgUnit"]["id"],
+        # Imputed zeros are a rendering device and must never be submitted.
+        # They are added by coverage.zero_fill for the preview only, and are
+        # never persisted, so in practice none reach here — this filter exists
+        # so that a future caller who passes the displayed values by mistake
+        # gets the right payload rather than a silent misreport.
+        #
+        # Sending them would in any case achieve nothing. Measured against the
+        # live instance on 2 September 2026, a dry-run import of "1" reports
+        # imported=1 and the identical element with "0" reports imported=0,
+        # ignored=0 and no conflict: zeroIsSignificant is false on 3,247 of the
+        # 3,252 elements across the eight data sets, so DHIS2 drops the zero
+        # without comment. On the server, the absent cell IS the zero.
         "dataValues": [
             {
                 "dataElement": v["dataElement"],
@@ -152,6 +164,7 @@ def build_payload(report_type: str, period: str, data_values: list, org_unit: st
                 "value": v["value"],
             }
             for v in data_values
+            if not v.get("imputed")
         ],
     }
     aoc = resolve_attribute_option_combo(ds["id"])

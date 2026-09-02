@@ -130,7 +130,8 @@ def _fetch_data_elements(only=None):
             continue
         r = s.get(
             f"{base}/api/dataSets/{ds['id']}.json",
-            params={"fields": "id,name,dataSetElements[dataElement[id,name,categoryCombo[id]]]"},
+            params={"fields": "id,name,dataSetElements[dataElement[id,name,code,"
+                              "valueType,zeroIsSignificant,categoryCombo[id]]]"},
             timeout=60,
         )
         r.raise_for_status()
@@ -149,8 +150,19 @@ def _fetch_data_elements(only=None):
                          de["name"])
             des[de["id"]] = {
                 "name": de["name"],
+                # The HMIS code the compiler matches on comes from the element
+                # NAME, not from DHIS2's own `code` field. Checked against the
+                # live instance on 2 September 2026: all 3,249 coded elements
+                # carry a DHIS2 code, and in 3,248 cases it differs from the
+                # code embedded in the name. They are two separate schemes and
+                # only the name-borne one is the Ministry's HMIS code.
                 "code": m.group(2) if m else None,
+                "dhis2Code": de.get("code"),
                 "categoryCombo": de["categoryCombo"]["id"],
+                "valueType": de.get("valueType"),
+                # False on 3,247 of 3,252 elements, which is why zeros are
+                # rendered by us and never pushed. See coverage.py.
+                "zeroIsSignificant": bool(de.get("zeroIsSignificant")),
             }
         out[key] = des
     return out

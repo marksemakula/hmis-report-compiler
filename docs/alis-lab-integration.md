@@ -101,13 +101,32 @@ already stored costs nothing and is available today.
 
 | Table | Rows | Grain |
 |---|---|---|
-| `INTLabResults` | 28,211 | one row per test |
-| `INTLabResultsEXT` | 250,667 | one row per analyte within a test |
+| `LabResults` | 28,228 | one row per test — **the clinical record** |
+| `LabResultsEXT` | 250,701 | one row per analyte — **where the values are** |
+| `INTLabResults` | 28,214 | integration staging |
+| `INTLabResultsEXT` | 250,701 | integration staging |
 | `INTTestCMIntegrationResponse` | 333,895 | raw `payloadmsg` |
 
-`INTLabResults` carries `SpecimenNo`, `TestCode`, `TestDateTime`, `Result`,
-`UnitMeasure`, `NormalRange`, `ResultFlagID`, `LabTechnologist` — everything a
-laboratory tally on an HMIS form needs, on the same server as the visits.
+Read the unprefixed pair. The `INT` tables are integration staging; `LabResults`
+holds fourteen results the integration never carried.
+
+**The value is not on the parent row.** `LabResults.Result` is blank for every
+reportable test — 3,724 empty malaria smears, 222 empty HIV serologies. The
+parent is a container and the value sits one level down in `LabResultsEXT`, one
+row per analyte. The proof is in the same output: sub-test `01 Detection`
+appears exactly 3,724 times, matching the blank malaria parents one for one.
+`ResultFlagID` is no help either — it is `104NA` on all 28,214 rows.
+
+**The join back to a visit holds.** `LabRequests` carries both `SpecimenNo` and
+`VisitNo`, and 28,191 of the 28,214 results reconcile to it — 99.9 per cent. So
+`LabResults → LabRequests → Visits → Patients` yields the age and sex every
+laboratory cell on an HMIS form is disaggregated by. `LabRequestsIPD` (46,805
+rows) carries a specimen but no visit and reaches the patient by some other
+route, which script 12 identifies.
+
+**The history is short.** 2023: 389 results. 2024: 1,483. 2025: 6,035. 2026:
+20,307. The integration only came into real use this year, so laboratory fields
+before 2026 will be sparse whatever we do.
 
 **Consequence for the compiler.** No network connector is required to fill the
 laboratory fields on HMIS 105 and 106a. The on-premise agent reads
@@ -119,14 +138,52 @@ A client for `labhie` remains worth building later, for *ordering* tests and for
 results that ALIS holds but ClinicMaster has not pulled. It is no longer on the
 critical path for reporting.
 
-## Open questions, answered by script 11
+## The test catalogue
 
-1. Which tests exist, and in what volume.
-2. What a result looks like — `Positive`, `POS`, `1`, `R` — since a tally of
-   positives cannot be written against an unseen vocabulary.
-3. How `SpecimenNo` reaches a visit, and therefore an age and a sex. Without
-   that join every laboratory cell on the form stays blank regardless of how
-   many results we hold.
+Fifty-nine distinct tests have produced results. Codes are SNOMED CT where a
+concept exists and local otherwise. Those that matter to the HMIS forms:
+
+| Code | Test | Results |
+|---|---|---|
+| `372071003` | BS for mps (Malaria) | 3,773 |
+| `407727009` | Malaria RDT | 324 |
+| `165813002` | HIV serology | 222 |
+| `313660005` | CD4 count | 152 |
+| `9000001` | Xpert MTB/Rif | 127 |
+| `121980003` | CrAg | 116 |
+| `951277` | Urine TB LAM | 84 |
+| `47758006` | HBsAg | 562 |
+| `269829001` | TPHA | 451 |
+| `19869000` | RPR | 157 |
+| `399256002` | HIV-1 DNA PCR | 5 |
+| `28804003` | HIV drug resistance | 2 |
+| `315124004` | HIV viral load | 1 |
+
+Two things follow. The HIV drug-resistance count of 2 independently corroborates
+the HIVDR data-call return, which reported one result in 2025 and one in 2026.
+And HIV testing volume is *not* principally in the laboratory tables — 222
+serologies against 2,198 rows in `PreTestingCounseling` — so HMIS 105:04-05 must
+be compiled from the HTS tables, not from the lab.
+
+## A defect worth reporting to the ClinicMaster vendor
+
+Sixty-six results are stuck with `SyncStatus = 0` and this error:
+
+> Procedure or function 'uspUpdateLabResults' expects parameter
+> '@DateResultsReceived', which was not supplied.
+
+A stored procedure's signature changed and its caller was not updated. These are
+laboratory results that came back from CPHL and never attached to the patient's
+record. It is a clinical-safety issue, not just a reporting one, and it is
+plausibly a regression from the 6.5.0 upgrade.
+
+## Open questions, answered by script 12
+
+1. The result vocabulary, read from `LabResultsEXT` where the values actually
+   are, and from `LabPossibleResults` (43 rows) if that is the controlled list.
+2. How `LabRequestsIPD` reaches a patient.
+3. How many results in each year can be traced to a visit, and therefore
+   reported at all.
 
 ## For CPHL
 

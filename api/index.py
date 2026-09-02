@@ -20,7 +20,7 @@ from _lib.surveillance import (
     SURV_COLUMNS, compile_033b, describe_week, parse_week_period,
     template_csv, validate_surveillance_rows,
 )
-from _lib import dhis2, extract_scripts, forms, periods
+from _lib import coverage, dhis2, extract_scripts, forms, periods
 
 EXPECTED_COLUMNS = {"OPD": OPD_COLUMNS, "IPD": IPD_COLUMNS, "SURV": SURV_COLUMNS}
 
@@ -661,6 +661,10 @@ def preview_status(report_type: str, period: str, user: dict = Depends(current_u
         "period": period,
         "periodLabel": periods.describe(entry["periodType"], period),
         "compiler": bool(entry.get("compiler")),
+        # How much of the form this compiler answers for, and how much of that
+        # it filled. Reported even with no compiled report, because knowing that
+        # 4,060 of 6,329 cells are ours is useful before anything is compiled.
+        "coverage": coverage.zero_fill(values, report_type)[1],
         "report": None if not row else {
             "id": row["id"],
             "values": len(values),
@@ -689,14 +693,22 @@ def preview(report_type: str, period: str, user: dict = Depends(current_user)):
     if isinstance(values, str):
         values = json.loads(values)
 
+    # Show a zero wherever this compiler answers for a cell and counted nothing.
+    # Only for a report that was actually compiled: zero-filling a blank form
+    # would assert that nothing happened all month, which is a different and
+    # much larger claim than "we compiled this and found none".
+    shown, cov = (values, {}) if not row else coverage.zero_fill(values, report_type)
+
     try:
         doc = forms.render_document(
             report_type=report_type.upper(),
             period=period,
             period_label=periods.describe(entry["periodType"], period),
-            values=forms.values_map(values),
+            values=forms.values_map(shown),
             meta={"report_id": (row or {}).get("id"),
-                  "push_status": (row or {}).get("push_status")},
+                  "push_status": (row or {}).get("push_status"),
+                  "imputed": forms.imputed_keys(shown),
+                  "coverage": cov},
         )
     except RuntimeError as exc:
         err(str(exc), 503)

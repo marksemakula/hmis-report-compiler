@@ -190,6 +190,20 @@ def values_map(compiled_values: list) -> dict:
     }
 
 
+def imputed_keys(compiled_values: list) -> set:
+    """The subset of keys that are zero-fills rather than measurements.
+
+    A measured zero and an imputed zero print the same character, so the
+    difference has to be carried separately or the page cannot tell the reader
+    which is which — and on a surveillance return that difference is the whole
+    point."""
+    return {
+        f"{v['dataElement']}-{v['categoryOptionCombo']}"
+        for v in (compiled_values or [])
+        if v.get("imputed") and v.get("dataElement") and v.get("categoryOptionCombo")
+    }
+
+
 PAGE_CSS = """
 :root { --deep:#0F5257; --mid:#1B7B7B; --coral:#C2552E; --pale:#E8F1F1;
         --line:#D4E2E2; --ink:#1A1A1A; --grey:#6B7A7A; }
@@ -208,7 +222,20 @@ body { margin:0; padding:0 0 40px; background:#fff; color:var(--ink);
       border-bottom:1px solid var(--line); font-variant-numeric:tabular-nums; }
 .hv.filled { background:var(--pale); border-bottom:1px solid var(--mid);
              font-weight:700; color:var(--deep); }
+/* An imputed zero is shown, but never dressed up as a measurement: no fill,
+   no bold, and a muted colour, so a reader scanning the page can see at a
+   glance which figures were counted and which mean "none recorded". */
+.hv.zero { color:var(--grey); font-weight:400; }
 .hv.empty::after { content:'\\00a0'; color:transparent; }
+.legend { display:flex; flex-wrap:wrap; gap:14px; align-items:center;
+          padding:7px 20px; border-bottom:1px solid var(--line);
+          font-size:11.5px; color:var(--grey); }
+.legend i { font-style:normal; display:inline-block; min-width:22px;
+            text-align:center; padding:1px 5px; margin-right:5px; }
+.legend i.k1 { background:var(--pale); color:var(--deep); font-weight:700;
+               border-bottom:1px solid var(--mid); }
+.legend i.k2 { color:var(--grey); border-bottom:1px solid var(--line); }
+.legend i.k3 { border-bottom:1px solid var(--line); }
 table { border-collapse:collapse; }
 td, th { padding:2px 5px; vertical-align:middle; }
 img { max-width:100%; }
@@ -223,26 +250,46 @@ def render_document(report_type: str, period: str, period_label: str,
     ds_key = entry.get("dataSet", "")
     ds = mapping()["dataSets"].get(ds_key, {})
 
-    filled = {"n": 0}
+    imputed = set(meta.get("imputed") or ())
+    counted = {"measured": 0, "zero": 0}
 
     def _fill(m):
         key = m.group(1)
         if key and key in values:
-            filled["n"] += 1
+            if key in imputed:
+                counted["zero"] += 1
+                return f'<span class="hv zero">{html_lib.escape(values[key])}</span>'
+            counted["measured"] += 1
             return f'<span class="hv filled">{html_lib.escape(values[key])}</span>'
         return '<span class="hv empty"></span>'
 
     body = _SLOT_RE.sub(_fill, skeleton(report_type))
 
     if meta.get("report_id"):
-        state = (f'<span><b>{filled["n"]}</b> values from compiled report '
+        state = (f'<span><b>{counted["measured"]}</b> compiled figures from report '
                  f'#{meta["report_id"]}</span>')
+        if counted["zero"]:
+            state += f' <span>· <b>{counted["zero"]}</b> shown as zero</span>'
         if meta.get("push_status") and meta["push_status"] != "PENDING":
             state += f' <span>· submission status <b>{html_lib.escape(str(meta["push_status"]))}</b></span>'
         else:
             state += ' <span class="flag">· not yet submitted</span>'
     else:
         state = '<span class="flag">Blank form — no report compiled for this period</span>'
+
+    cov = meta.get("coverage") or {}
+    if cov.get("notOurs"):
+        legend = (
+            '<div class="legend">'
+            '<span><i class="k1">42</i>counted from the register</span>'
+            '<span><i class="k2">0</i>no cases recorded this period</span>'
+            '<span><i class="k3">&nbsp;</i>not compiled here — entered from '
+            f'another register</span><span>{cov["notOurs"]} of {cov["cells"]} cells '
+            'on this form are filled by other staff, so they are left blank rather '
+            'than zeroed.</span></div>'
+        )
+    else:
+        legend = ""
 
     return (
         "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
@@ -253,5 +300,6 @@ def render_document(report_type: str, period: str, period_label: str,
         f"<div class='sub'>{html_lib.escape(mapping()['orgUnit']['name'])}</div></div>"
         f"<div class='bar'><span>Period <b>{html_lib.escape(period)}</b> — "
         f"{html_lib.escape(period_label)}</span>{state}</div>"
+        f"{legend}"
         f"<div class='wrap'>{body}</div></body></html>"
     )
