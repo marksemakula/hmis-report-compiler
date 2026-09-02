@@ -238,3 +238,21 @@ from _lib import compiler as srv  # noqa: E402
 src = inspect.getsource(srv.compile_opd_strata)
 check("compile_opd_strata declares its diagnoses are ICD-11",
       'source="icd11"' in src, True)
+
+print("\nCode normalisation must be identical when the table is built and read")
+# Jinja's dictionary carries local codes typed by hand beside the ICD-11 stems:
+# fifteen are lower-case and eighteen contain a space. The table was first built
+# verbatim and read back upper-cased, so 'k8956' (Upper respiratory tract
+# infection, 123 cases in July 2026) and 'nr302' (Tinea pedis) silently became
+# All others.
+check("lower case resolves", dmap.icd11_to_hmis("k8956"), "CD11")
+check("upper case resolves to the same thing", dmap.icd11_to_hmis("K8956"), "CD11")
+check("mixed case resolves too", dmap.icd11_to_hmis("K8956"), dmap.icd11_to_hmis("k8956"))
+check("another real lower-case code", dmap.icd11_to_hmis("nr302"), "CD14")
+check("internal spaces are ignored",
+      dmap.normalise_code("DO 970"), dmap.normalise_code("DO970"))
+check("surrounding whitespace is ignored",
+      dmap.normalise_code("  1C61  "), "1C61")
+check("every stored key is already in normal form",
+      [k for k in dmap.icd11_map() if k != dmap.normalise_code(k)], [])
+check("blank normalises to blank", dmap.normalise_code(None), "")

@@ -59,7 +59,7 @@ def main(path):
 
     mapping, skipped, collisions = {}, 0, {}
     for row in rows[1:]:
-        code = str(row[0] or "").strip()
+        code = dm.normalise_code(row[0])
         name = str(row[1] or "").strip()
         if not code or not name:
             continue
@@ -67,6 +67,9 @@ def main(path):
         if not hmis or hmis == "OP01":
             skipped += 1
             continue
+        # Normalising can make two dictionary rows share a key ('DO 970' and
+        # 'DO970'). If they disagree the mapping is ambiguous and the operator
+        # must see it rather than have one silently win.
         if code in mapping and mapping[code] != hmis:
             collisions[code] = (mapping[code], hmis)
         mapping[code] = hmis

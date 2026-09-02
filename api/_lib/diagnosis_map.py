@@ -139,13 +139,23 @@ def icd11_map() -> dict:
     return _ICD11
 
 
+def normalise_code(code: str) -> str:
+    """One normal form for a ClinicMaster disease code, used when the table is
+    BUILT and when it is READ.
+
+    Both sides matter. The table was first built from the dictionary verbatim
+    and read back upper-cased, so 'k8956' (Upper respiratory tract infection,
+    123 cases in July 2026) and 'nr302' (Tinea pedis) never matched and were
+    reported as All others. Jinja's dictionary carries fifteen lower-case codes
+    and eighteen containing a space - 'DO 970' is vaginal candidiasis - because
+    local codes are typed by hand alongside the real ICD-11 stems."""
+    return re.sub(r"\s+", "", str(code or "")).upper()
+
+
 def icd11_to_hmis(code: str):
     """The HMIS 105 code for a ClinicMaster disease code, or None."""
-    key = re.sub(r"\s+", "", str(code or "")).upper()
-    if not key:
-        return None
-    table = icd11_map()
-    return table.get(key) or table.get(key.title())
+    key = normalise_code(code)
+    return icd11_map().get(key) if key else None
 
 
 def map_diagnosis(raw: str, code_index, source: str = "emr"):
