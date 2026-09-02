@@ -26,10 +26,15 @@ from _lib import metadata  # noqa: E402
 DES = {
     "de_malaria": {"name": "105-EP01c. Malaria (Confirmed)", "code": "EP01c",
                    "categoryCombo": "esaNB4G5AHs"},
-    "de_epilepsy": {"name": "105-MH26. Epilepsy", "code": "MH26",
+    "de_epilepsy": {"name": "105-MH33. Epilepsy", "code": "MH33",
                     "categoryCombo": "esaNB4G5AHs"},
     "de_flat": {"name": "105-XX01. Something undisaggregated", "code": "XX01",
                 "categoryCombo": "bjDvmb4bfuf"},
+    # All others, the real HMIS 105 line unmapped conditions are tallied
+    # against. Both paths must route to it identically, or one silently
+    # discards conditions the other counts.
+    "de_other": {"name": "105-OP01. All others", "code": "OP01",
+                 "categoryCombo": "esaNB4G5AHs"},
     # The two attendance elements the compiler always writes, under their real
     # identifiers, so _to_values can resolve their names.
     "sv6SeKroHPV": {"name": "105-OA01. New attendance", "code": "OA01",
@@ -84,6 +89,20 @@ check("sex normalises", [ag.normalise_sex(x) for x in ["F", "female", "M", "Male
 
 print("\nThe two compile paths must agree exactly")
 # Fifty visits spread across bands, sexes, visit types and diagnoses.
+# The two paths speak different diagnosis namespaces and that is deliberate:
+# an upload carries HMIS codes or free text a records officer wrote, while the
+# agent carries ClinicMaster's ICD-11 stems. They collide - ICD-11 CA02 is acute
+# pharyngitis, HMIS CA02 is prostate cancer - so the fixture pairs each HMIS
+# code with a real ICD-11 code that maps to it, rather than pretending one
+# string can mean both.
+#
+# ICD-11 codes taken from api/_lib/icd11_hmis_map.json, generated from Jinja's
+# own Diseases table: 1C61 is malaria, 8A60 is epilepsy.
+DIAGNOSIS_PAIRS = [
+    ("EP01c", "1C61"),      # malaria
+    ("MH33", "8A60"),       # epilepsy
+    ("QQ99", "ZZ99"),       # neither side maps: both must reach All others
+]
 VISITS = []
 for i in range(50):
     VISITS.append({
@@ -91,7 +110,7 @@ for i in range(50):
         "age_years": [0.01, 2.0, 7.0, 15.0, 40.0][i % 5],
         "sex": ["Male", "Female"][i % 2],
         "visit_type": ["New", "Re"][i % 3 == 0],
-        "diagnosis_code": ["EP01c", "MH26", "XX01"][i % 3],
+        "diagnosis_code": DIAGNOSIS_PAIRS[i % 3][0],
     })
 upload_values, upload_unmapped = srv.compile_opd(VISITS, "202606")
 
@@ -103,7 +122,8 @@ att, cond = {}, {}
 for v in VISITS:
     b, sx, vt = srv.opd_band(v["age_years"]), v["sex"], v["visit_type"]
     att[(b, sx, vt)] = att.get((b, sx, vt), 0) + 1
-    key = (v["diagnosis_code"], b, sx, vt)
+    icd = next(icd for hmis, icd in DIAGNOSIS_PAIRS if hmis == v["diagnosis_code"])
+    key = (icd, b, sx, vt)
     cond[key] = cond.get(key, 0) + 1
 strata = ([{"diagnosis": agentlib.ATTENDANCE_SENTINEL, "band": b, "sex": s, "visit": vt, "n": n}
            for (b, s, vt), n in sorted(att.items())]
@@ -124,7 +144,13 @@ check("attendance rows are marked, condition rows are not",
       sorted({r["count_attendance"] for r in rows}), [False, True])
 check("same number of data values", len(agent_values), len(upload_values))
 check("every value identical", as_dict(agent_values), as_dict(upload_values))
-check("unmapped identical", agent_unmapped, upload_unmapped)
+# The unmapped LISTS name different strings - the upload reports the HMIS code
+# it could not place, the agent reports the ICD-11 code - but the number of
+# records that failed to map must be identical, or one path is silently
+# discarding conditions the other counts.
+check("the same number of records fail to map",
+      sum(u["records"] for u in agent_unmapped),
+      sum(u["records"] for u in upload_unmapped))
 check("total attendance preserved",
       sum(int(v["value"]) for v in agent_values
           if v["dataElement"] in (metadata.CONSTANTS["keyDataElements"]["OA01_newAttendance"],

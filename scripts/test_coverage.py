@@ -167,3 +167,74 @@ if failures:
         print("  - " + f)
     sys.exit(1)
 print("All checks passed.")
+
+
+# ---------------------------------------------------------------------------
+# The ICD-11 / HMIS namespace collision, 3 September 2026.
+#
+# ClinicMaster records diagnoses as ICD-11 stems. HMIS 105 has its own codes.
+# They have the same shape and they OVERLAP, and the compiler was looking a
+# ClinicMaster code up directly in the HMIS index. July 2026 compiled as:
+#
+#   CA01 Acute sinusitis         -> 105-CA01. Cervical Cancer        1 case
+#   CA02 Acute pharyngitis       -> 105-CA02. Prostate Cancer       13 cases
+#   CA03 Acute tonsillitis       -> 105-CA03. Breast Cancer         18 cases
+#   CA04 Acute laryngopharyngitis-> 105-CA04. Lung Cancer            5 cases
+#   CA07 Acute URTI              -> 105-CA07. Colorectal Cancer      1 case
+#   NE10 Burns, multiple regions -> 105-NE10. Child abuse & Neglect  2 cases
+#
+# Thirty-three cancers and two child-protection cases that did not exist, bound
+# for the national figures. It was visible only because the distribution was
+# absurd: prostate cancer in a four-year-old girl, breast cancer in boys aged
+# five to nine. Plausible collisions would have gone through unnoticed.
+#
+# The disease names below are verbatim from ClinicMasterMOH.dbo.Diseases.
+# ---------------------------------------------------------------------------
+print("\nAn ICD-11 code must never be read as an HMIS code")
+from _lib import diagnosis_map as dmap  # noqa: E402
+
+COLLIDING = {
+    "CA01": ("ACUTE SINUSITIS", "Cervical Cancer"),
+    "CA02": ("ACUTE PHARYNGITIS", "Prostate Cancer"),
+    "CA03": ("ACUTE TONSILLITIS", "Breast Cancer"),
+    "CA04": ("ACUTE LARYNGOPHARYNGITIS", "Lung Cancer"),
+    "CA07": ("ACUTE UPPER RESPIRATORY INFECTIONS", "Colorectal Cancer"),
+    "NE10": ("BURNS OF MULTIPLE BODY REGIONS", "Child abuse and Neglect"),
+}
+idx = metadata._MAPPING["HMIS105_01_codeIndex"]
+for code, (real, wrong) in COLLIDING.items():
+    got = dmap.map_diagnosis(code, idx, source="icd11")
+    check(f"{code} ({real}) is not compiled as {wrong}", got == code, False)
+
+print("\n...and it resolves to the right thing instead")
+for code, want in [("CA01", "EN05"), ("CA02", "EN17"), ("CA03", "EN13"),
+                   ("CA04", "EN17"), ("CA07", "CD11")]:
+    check(f"{code} -> {want}", dmap.icd11_to_hmis(code), want)
+check("an unmapped ICD-11 code goes to All others, not nowhere",
+      dmap.map_diagnosis("NE10", idx, source="icd11"), "OP01")
+check("an ICD-11 code with no entry still counts",
+      dmap.map_diagnosis("ZZ99", idx, source="icd11"), "OP01")
+check("blank stays blank", dmap.map_diagnosis("", idx, source="icd11"), "")
+
+print("\nThe EMR path is unchanged: a typed HMIS code is still honoured")
+check("a records officer typing CV02 still means CV02",
+      dmap.map_diagnosis("CV02", {"CV02": "de_x"}), "CV02")
+check("free text still maps clinically",
+      dmap.map_diagnosis("ESSENTIAL HYPERTENSION", {}), "CV02")
+check("the same string under icd11 does NOT identity-match",
+      dmap.map_diagnosis("CV02", {"CV02": "de_x"}, source="icd11"), "OP01")
+
+print("\nThe generated table is present and sane")
+tbl = dmap.icd11_map()
+check("table loaded", len(tbl) > 2000, True)
+check("every value is an HMIS code, never an ICD-11 passthrough",
+      [k for k, v in tbl.items() if k == v], [])
+check("no entry maps to All others; absence means All others",
+      [k for k, v in tbl.items() if v == "OP01"], [])
+
+print("\nThe compiler must ask for the namespace, not guess it")
+import inspect  # noqa: E402
+from _lib import compiler as srv  # noqa: E402
+src = inspect.getsource(srv.compile_opd_strata)
+check("compile_opd_strata declares its diagnoses are ICD-11",
+      'source="icd11"' in src, True)

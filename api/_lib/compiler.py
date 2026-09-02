@@ -152,8 +152,13 @@ def compile_opd_strata(rows: list, period: str):
             counts[(att_de, att_coc)] += weight
             continue
 
+        # These diagnoses came from ClinicMaster's Diseases.DiseaseCode, which
+        # is ICD-11. Saying so is not decoration: ICD-11 stems and HMIS 105
+        # codes share a shape and overlap, and without this the compiler reads
+        # acute pharyngitis (CA02) as prostate cancer (105-CA02). See
+        # diagnosis_map.map_diagnosis for what that produced for July 2026.
         raw = str(r.get("diagnosis_code") or "").strip()
-        code = map_diagnosis(raw, code_index) if raw else ""
+        code = map_diagnosis(raw, code_index, source="icd11") if raw else ""
         code = re.sub(r"\s+", "", code)
         de_id = code_index.get(code)
         if not de_id:
@@ -162,6 +167,14 @@ def compile_opd_strata(rows: list, period: str):
             if other:
                 counts[(other, att_coc)] += weight
             continue
+
+        # A condition that reached All others because nothing matched it is
+        # still reported in the review list. The translation resolves it to a
+        # real element, so the lookup above succeeds and it would otherwise
+        # vanish from view - and that list is precisely how anyone knows which
+        # ICD-11 codes to add to the mapping next.
+        if code == ALL_OTHERS_CODE and raw.upper() != ALL_OTHERS_CODE:
+            unmapped[raw] += weight
 
         cc = des[de_id]["categoryCombo"]
         if cc == m["categoryCombos"]["OPD_AGE_SEX"]["id"]:
