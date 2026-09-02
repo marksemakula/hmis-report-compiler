@@ -555,16 +555,43 @@ def connect(server, database, user, password):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="JRRH {report_label} extraction for {period}")
+    ap = argparse.ArgumentParser(
+        description="JRRH {report_label} extraction for {period}",
+        epilog=("Example:\n"
+                "    python {script} --user readonly_user\n\n"
+                "--user is the SQL Server login for ClinicMaster. A read-only\n"
+                "login is strongly preferred: this script only ever reads.\n"
+                "Leave it out and you will be asked for it.\n\n"
+                "The password is never taken on the command line, never stored\n"
+                "and never written to the output file."),
+        formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--server", default=SERVER)
     ap.add_argument("--database", default=DATABASE)
-    ap.add_argument("--user", required=True)
+    # Not required. Running the script with no arguments used to fail with a
+    # bare argparse usage error and no hint as to what a "user" was; asking is
+    # friendlier and matches the PowerShell version, where a mandatory
+    # parameter prompts rather than aborts.
+    ap.add_argument("--user", help="SQL Server login. You will be prompted if omitted.")
     ap.add_argument("--out", default=OUTPUT)
     args = ap.parse_args()
 
-    password = getpass.getpass(f"Password for SQL login {{args.user!r}}: ")
-    print(f"Connecting to {{args.server}} ...")
-    conn = connect(args.server, args.database, args.user, password)
+    user = (args.user or "").strip()
+    if not user:
+        try:
+            user = input(f"SQL Server login for {{args.server}}: ").strip()
+        except EOFError:
+            user = ""
+    if not user:
+        print("No login given, so there is nothing to connect with. "
+              "Re-run with --user YOUR_LOGIN.")
+        return 2
+
+    password = getpass.getpass(f"Password for SQL login {{user!r}}: ")
+    if not password:
+        print("No password given. Nothing was read and no file was written.")
+        return 2
+    print(f"Connecting to {{args.server}} as {{user}} ...")
+    conn = connect(args.server, args.database, user, password)
     cur = conn.cursor()
     cur.execute(SQL)
 
@@ -606,7 +633,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # main() returns a non-zero code when it gave up before reading anything,
+    # so a scheduled run or a shell loop can tell "no data" from "not run".
+    sys.exit(main() or 0)
 '''
 
 
@@ -704,16 +733,43 @@ def connect(server, database, user, password):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="JRRH {label}")
+    ap = argparse.ArgumentParser(
+        description="JRRH {label}",
+        epilog=("Example:\n"
+                "    python {script} --user readonly_user\n\n"
+                "--user is the SQL Server login for ClinicMaster. A read-only\n"
+                "login is strongly preferred: this script only ever reads.\n"
+                "Leave it out and you will be asked for it.\n\n"
+                "The password is never taken on the command line, never stored\n"
+                "and never written to the output file."),
+        formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--server", default=SERVER)
     ap.add_argument("--database", default=DATABASE)
-    ap.add_argument("--user", required=True)
+    # Not required. Running the script with no arguments used to fail with a
+    # bare argparse usage error and no hint as to what a "user" was; asking is
+    # friendlier and matches the PowerShell version, where a mandatory
+    # parameter prompts rather than aborts.
+    ap.add_argument("--user", help="SQL Server login. You will be prompted if omitted.")
     ap.add_argument("--out", default=OUTPUT)
     args = ap.parse_args()
 
-    password = getpass.getpass(f"Password for SQL login {{args.user!r}}: ")
-    print(f"Connecting to {{args.server}} ...")
-    conn = connect(args.server, args.database, args.user, password)
+    user = (args.user or "").strip()
+    if not user:
+        try:
+            user = input(f"SQL Server login for {{args.server}}: ").strip()
+        except EOFError:
+            user = ""
+    if not user:
+        print("No login given, so there is nothing to connect with. "
+              "Re-run with --user YOUR_LOGIN.")
+        return 2
+
+    password = getpass.getpass(f"Password for SQL login {{user!r}}: ")
+    if not password:
+        print("No password given. Nothing was read and no file was written.")
+        return 2
+    print(f"Connecting to {{args.server}} as {{user}} ...")
+    conn = connect(args.server, args.database, user, password)
     cur = conn.cursor()
     cur.execute(SQL)
     cols = [d[0] for d in cur.description]
@@ -732,7 +788,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # main() returns a non-zero code when it gave up before reading anything,
+    # so a scheduled run or a shell loop can tell "no data" from "not run".
+    sys.exit(main() or 0)
 '''
 
 def generate(report_type: str, period: str, os_key: str, period_type: str,

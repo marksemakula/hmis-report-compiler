@@ -270,3 +270,65 @@ check("every non-scriptable report has a stated reason",
 check("scriptable and non-scriptable together cover every registered report",
       sorted(gen.SCRIPTABLE | set(gen.NOT_SCRIPTABLE)),
       ["HIV", "HTS", "IPD", "MCH", "OPD", "PALL", "SURV", "TBL"])
+
+
+# ---------------------------------------------------------------------------
+# Running the script, added 3 September 2026.
+#
+# Reported from a real run: `python3 jrrh_extract_opd_202607.py` failed with
+#
+#     error: the following arguments are required: --user
+#
+# and nothing else. Correct behaviour from argparse, useless to the person
+# holding the file: no example, no hint that "user" means a SQL Server login,
+# no mention that the password is prompted for rather than typed on the command
+# line. The PowerShell version was fine all along, because a mandatory
+# parameter in PowerShell prompts instead of aborting.
+#
+# These checks actually EXECUTE the generated script, because the fault was in
+# its runtime behaviour and no amount of reading the template would have shown
+# it.
+# ---------------------------------------------------------------------------
+import subprocess          # noqa: E402
+import sys as _sys         # noqa: E402
+import tempfile            # noqa: E402
+
+print("\nThe generated script must be runnable by someone who has not read it")
+for rt, per, ptype in (("OPD", "202607", "Monthly"), ("SURV", "2026W35", "Weekly")):
+    fname, body = gen.generate(rt, per, "macos", ptype, "105:01")
+    tmp = os.path.join(tempfile.mkdtemp(), fname)
+    with open(tmp, "w") as fh:
+        fh.write(body)
+
+    helped = subprocess.run([_sys.executable, tmp, "--help"],
+                            capture_output=True, text=True, timeout=60)
+    check(f"{rt}: --help succeeds", helped.returncode, 0)
+    check(f"{rt}: --help shows a worked example", "Example:" in helped.stdout, True)
+    check(f"{rt}: --help explains what a user is",
+          "SQL Server login" in helped.stdout, True)
+    check(f"{rt}: --help says a read-only login is preferred",
+          "read-only" in helped.stdout, True)
+    check(f"{rt}: --help promises the password is not stored",
+          "never stored" in helped.stdout, True)
+
+    bare = subprocess.run([_sys.executable, tmp], input="",
+                          capture_output=True, text=True, timeout=60)
+    check(f"{rt}: running it bare does NOT abort with an argparse usage error",
+          "the following arguments are required" in bare.stderr, False)
+    check(f"{rt}: running it bare asks for the login instead",
+          "SQL Server login for" in bare.stdout, True)
+    check(f"{rt}: it names the server it will connect to",
+          gen.DEFAULT_SERVER in bare.stdout, True)
+    check(f"{rt}: giving no login exits non-zero rather than pretending success",
+          bare.returncode, 2)
+    check(f"{rt}: and says how to supply one", "--user" in bare.stdout, True)
+
+print("\nThe password must never be a command-line argument")
+for os_key in ("macos", "linux"):
+    _, body = gen.generate("OPD", "202607", os_key, "Monthly", "105:01")
+    check(f"{os_key}: no --password option", '"--password"' in body, False)
+    check(f"{os_key}: read through getpass", "getpass.getpass" in body, True)
+_, ps = gen.generate("OPD", "202607", "windows", "Monthly", "105:01")
+check("windows: password is a secure string", "-AsSecureString" in ps, True)
+check("windows: a missing login prompts rather than aborts",
+      "Mandatory=$true)][string]$User" in ps, True)
