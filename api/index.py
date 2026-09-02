@@ -777,6 +777,18 @@ def extraction_script_options(user: dict = Depends(current_user)):
             {"key": k, **v} for k, v in extract_scripts.OS_CHOICES.items()
         ],
         "reports": sorted(extract_scripts.SCRIPTABLE),
+        # Every registered report, with the reason where there is no script.
+        # A report simply missing from the picker reads as a fault in the app;
+        # a report listed with its reason reads as a plan.
+        "reportStatus": [
+            {"type": rt,
+             "short": entry["short"],
+             "label": entry["label"],
+             "periodType": entry["periodType"],
+             "available": rt in extract_scripts.SCRIPTABLE,
+             "reason": extract_scripts.NOT_SCRIPTABLE.get(rt, "")}
+            for rt, entry in mapping()["reportTypes"].items()
+        ],
         "utilities": [{"key": k, **v} for k, v in extract_scripts.UTILITIES.items()],
     }
 

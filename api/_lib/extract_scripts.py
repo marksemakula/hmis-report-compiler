@@ -53,8 +53,26 @@ OS_CHOICES = {
     "linux":   {"label": "Linux",             "ext": "py",  "runtime": "Python 3"},
 }
 
-# Reports a script can be generated for. Others are upload-only for now.
-SCRIPTABLE = {"OPD"}
+# Reports a script can be generated for. Others are upload-only for now, and
+# the page lists them with the reason rather than hiding them — a report that
+# is simply absent from the picker reads as a fault in the app.
+SCRIPTABLE = {"OPD", "SURV"}
+
+# Why each of the remaining reports has no script yet. Shown to the user, so
+# the wording is the explanation itself rather than a code to look up.
+NOT_SCRIPTABLE = {
+    "IPD": "The admission and ward tables have not been confirmed yet. Writing "
+           "the query against guessed column names is how the last three "
+           "extracts failed, so this one waits for the schema.",
+    "MCH": "No compiler yet — a script would produce a file nothing can turn "
+           "into data values.",
+    "HTS": "No compiler yet. It will also need the HTS tables rather than the "
+           "laboratory ones: HIV testing volume lives in PreTestingCounseling "
+           "(2,198 records), not in lab serology (222).",
+    "PALL": "No compiler yet.",
+    "HIV": "No compiler yet.",
+    "TBL": "No compiler yet.",
+}
 
 # Diagnostic scripts, which describe the database rather than extract a report.
 # They take no period and return reference data only, never patient rows.
@@ -214,6 +232,149 @@ FROM {DATABASE}.dbo.Visits
 WHERE VisitDate >= DATEADD(month,-3,GETDATE())
 
 ORDER BY section, a"""
+
+
+def surv_sql(start, end_exclusive) -> str:
+    """HMIS 033B weekly tally, as a two-column Code/Value grid.
+
+    A port of scripts/sql/07_period_extract.sql, with the week baked in so a
+    script downloaded for week 35 cannot be run against week 34. It carries
+    every correction that script needed between 2 and 3 September 2026:
+
+      * AP01 counts a patient's FIRST visit within the week. It previously
+        excluded visit categories by NAME, and the column holds codes
+        (10C, 10O, 10R, 10RTT), so nothing was excluded and AP01 came back
+        equal to AP02 — 3,619 of 3,619.
+      * Results are read from LabResultsEXT, not LabResults. The parent row
+        is blank in 25,915 of 28,252 cases.
+      * A result is classified from the clause before the first comma, because
+        'MTB DETECTED MEDIUM,RIF resistance NOT DETECTED' is a positive whose
+        tail says otherwise. Negatives are matched before positives, because
+        NON REACTIVE contains REACTIVE.
+      * MA02, MA04 and GP01 count tests RESULTED, which is what the form's
+        'Cases Tested' asks for. Counting orders reported 173 rapid tests in a
+        week where not one result was ever recorded.
+
+    The _ rows are extract metadata; the compiler carries them for audit and
+    does not attempt to map them to data elements.
+    """
+    s, e = start.isoformat(), end_exclusive.isoformat()
+    return f"""
+SET NOCOUNT ON;
+
+IF OBJECT_ID('tempdb..#tally') IS NOT NULL DROP TABLE #tally;
+IF OBJECT_ID('tempdb..#res')   IS NOT NULL DROP TABLE #res;
+CREATE TABLE #tally (Code varchar(20) NOT NULL PRIMARY KEY, Value int NOT NULL);
+CREATE TABLE #res (TestCode varchar(30), SubTestCode varchar(50), Verdict varchar(12));
+
+INSERT INTO #res (TestCode, SubTestCode, Verdict)
+SELECT x.TestCode, x.SubTestCode,
+       CASE
+         WHEN c.lead LIKE '%INVALID%'                                 THEN 'Invalid'
+         WHEN c.lead LIKE '%NON REACTIVE%' OR c.lead LIKE '%NOT DETECT%'
+           OR c.lead LIKE '%NO MPS%'       OR c.lead LIKE '%NO PLASMODIUM%'
+           OR c.lead LIKE '%NEGATIVE%'     OR c.lead LIKE '%NEGAITVE%'
+           OR c.lead LIKE '%NOT SEEN%'                                THEN 'Negative'
+         WHEN c.lead LIKE '%DETECT%'       OR c.lead LIKE '%REACTIVE%'
+           OR c.lead LIKE '%POSITIVE%'     OR c.lead LIKE '%POSTIVE%'
+           OR c.lead LIKE '%POSITVE%'      OR c.lead LIKE '%MPS%SEEN%' THEN 'Positive'
+         ELSE NULL END
+FROM   {DATABASE}.dbo.LabResultsEXT x
+JOIN   {DATABASE}.dbo.LabRequests r ON r.SpecimenNo = x.SpecimenNo
+CROSS APPLY (SELECT UPPER(REPLACE(
+                LEFT(CAST(ISNULL(x.Result, '') AS varchar(200)),
+                     CHARINDEX(',', CAST(ISNULL(x.Result, '') AS varchar(200)) + ',') - 1),
+                '-', ' ')) AS lead) c
+WHERE  r.DrawnDateTime >= '{s}' AND r.DrawnDateTime < '{e}';
+
+INSERT INTO #tally (Code, Value)
+SELECT 'AP02', COUNT(*) FROM {DATABASE}.dbo.Visits
+WHERE  VisitDate >= '{s}' AND VisitDate < '{e}';
+
+INSERT INTO #tally (Code, Value)
+SELECT 'AP01', COUNT(*)
+FROM   (SELECT ROW_NUMBER() OVER (PARTITION BY PatientNo
+                                  ORDER BY VisitDate, VisitNo) AS seq_in_period
+        FROM   {DATABASE}.dbo.Visits
+        WHERE  VisitDate >= '{s}' AND VisitDate < '{e}') v
+WHERE  v.seq_in_period = 1;
+
+INSERT INTO #tally (Code, Value)
+SELECT 'MA02', COUNT(*) FROM #res
+WHERE  TestCode = '407727009' AND SubTestCode = '407727009' AND Verdict IS NOT NULL;
+
+INSERT INTO #tally (Code, Value)
+SELECT 'MA03', COUNT(*) FROM #res
+WHERE  TestCode = '407727009' AND SubTestCode = '407727009' AND Verdict = 'Positive';
+
+INSERT INTO #tally (Code, Value)
+SELECT 'MA04', COUNT(*) FROM #res
+WHERE  TestCode = '372071003' AND SubTestCode = '01' AND Verdict IS NOT NULL;
+
+INSERT INTO #tally (Code, Value)
+SELECT 'MA05', COUNT(*) FROM #res
+WHERE  TestCode = '372071003' AND SubTestCode = '01' AND Verdict = 'Positive';
+
+INSERT INTO #tally (Code, Value)
+SELECT 'GP01', COUNT(*) FROM #res
+WHERE  TestCode IN ('9000001','LAB004') AND SubTestCode = 'ma7dy01a'
+  AND  Verdict IS NOT NULL;
+
+INSERT INTO #tally (Code, Value)
+SELECT 'GP02', COUNT(*)
+FROM   {DATABASE}.dbo.LabRequestDetails d
+JOIN   {DATABASE}.dbo.LabRequests r ON r.SpecimenNo = d.SpecimenNo
+WHERE  d.TestCode IN ('9000001','LAB004')
+  AND  r.DrawnDateTime >= '{s}' AND r.DrawnDateTime < '{e}'
+  AND  ISNULL(LTRIM(RTRIM(d.RejectedID)), '') NOT IN ('54N', '');
+
+INSERT INTO #tally (Code, Value)
+SELECT 'GP03', COUNT(*) FROM #res
+WHERE  TestCode IN ('9000001','LAB004') AND SubTestCode = 'ma7dy01a'
+  AND  Verdict = 'Positive';
+
+INSERT INTO #tally (Code, Value)
+SELECT 'GP04', COUNT(*) FROM #res
+WHERE  TestCode = '9000001' AND SubTestCode = 'tj6l4jhh' AND Verdict = 'Positive';
+
+INSERT INTO #tally (Code, Value)
+SELECT 'GP05', COUNT(*) FROM #res
+WHERE  TestCode IN ('9000001','LAB004') AND SubTestCode = 'ma7dy01a'
+  AND  Verdict = 'Invalid';
+
+/* Extract metadata. The compiler carries these for audit and does not map
+   them; the gap between ordered and resulted is what makes a zero readable. */
+INSERT INTO #tally (Code, Value)
+SELECT '_req_rdt', COUNT(*)
+FROM   {DATABASE}.dbo.LabRequestDetails d
+JOIN   {DATABASE}.dbo.LabRequests r ON r.SpecimenNo = d.SpecimenNo
+WHERE  d.TestCode = '407727009'
+  AND  r.DrawnDateTime >= '{s}' AND r.DrawnDateTime < '{e}';
+
+INSERT INTO #tally (Code, Value)
+SELECT '_req_smear', COUNT(*)
+FROM   {DATABASE}.dbo.LabRequestDetails d
+JOIN   {DATABASE}.dbo.LabRequests r ON r.SpecimenNo = d.SpecimenNo
+WHERE  d.TestCode = '372071003'
+  AND  r.DrawnDateTime >= '{s}' AND r.DrawnDateTime < '{e}';
+
+INSERT INTO #tally (Code, Value)
+SELECT '_req_xpert', COUNT(*)
+FROM   {DATABASE}.dbo.LabRequestDetails d
+JOIN   {DATABASE}.dbo.LabRequests r ON r.SpecimenNo = d.SpecimenNo
+WHERE  d.TestCode IN ('9000001','LAB004')
+  AND  r.DrawnDateTime >= '{s}' AND r.DrawnDateTime < '{e}';
+
+INSERT INTO #tally (Code, Value) VALUES
+    ('_days_covered',   DATEDIFF(day, '{s}', '{e}')),
+    ('_start_yyyymmdd', CAST(CONVERT(varchar(8), CAST('{s}' AS date), 112) AS int)),
+    ('_end_yyyymmdd',   CAST(CONVERT(varchar(8), CAST('{e}' AS date), 112) AS int));
+
+SELECT Code, Value FROM #tally ORDER BY Code;
+
+DROP TABLE #tally;
+DROP TABLE #res;
+""".strip()
 
 
 def diseases_sql() -> str:
@@ -596,15 +757,37 @@ def generate(report_type: str, period: str, os_key: str, period_type: str,
         return name, tpl.format(**common)
 
     if report_type not in SCRIPTABLE:
+        why = NOT_SCRIPTABLE.get(report_type)
         raise ValueError(
-            f"No extraction script exists for {report_type} yet. "
-            f"Available: {', '.join(sorted(SCRIPTABLE | set(UTILITIES)))}")
+            f"No extraction script exists for {report_type} yet."
+            + (f" {why}" if why else "")
+            + f" Available: {', '.join(sorted(SCRIPTABLE | set(UTILITIES)))}")
 
     span = bounds(period_type, period)
     if not span:
         raise ValueError(f"{period!r} is not a valid {period_type.lower()} period")
     start, end = span
     end_exclusive = date.fromordinal(end.toordinal() + 1)
+
+    # 033B is a tally, not a line-listed register: its script returns a
+    # two-column Code/Value grid and needs no age banding or sex mapping, so it
+    # goes through the same plain template the diagnostic scripts use.
+    if report_type == "SURV":
+        name = script_name(report_type, period, os_key)
+        tpl = GENERIC_PS if os_key == "windows" else GENERIC_PY
+        return name, tpl.format(
+            label=f"{report_label} — {describe(period_type, period)}",
+            note=("Weekly epidemiological surveillance tally for "
+                  f"{describe(period_type, period)} ({period}). The week is "
+                  "fixed in the query, so this script cannot be run against a "
+                  "different one. It writes two columns, Code and Value, which "
+                  "is what the compiler's 033B upload expects. Rows whose code "
+                  "begins with an underscore are extract metadata for the "
+                  "audit trail, not indicators — leave them in the file."),
+            generated=date.today().isoformat(),
+            server=server, database=DATABASE,
+            output=output_name(report_type, period), script=name,
+            sql=surv_sql(start, end_exclusive))
 
     sql = opd_sql(start, end_exclusive)
     common = {

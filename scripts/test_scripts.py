@@ -177,3 +177,96 @@ if failures:
         print("  - " + f)
     sys.exit(1)
 print("All checks passed.")
+
+
+# ---------------------------------------------------------------------------
+# HMIS 033B weekly surveillance, added 3 September 2026.
+#
+# 033B is a tally, not a register: its script returns two columns and needs no
+# age banding. The codes it emits were checked against the live national
+# instance on 3 September 2026 — all twelve resolve, and all 239 of the data
+# set's elements parse — so an upload compiled from this script cannot come
+# back with an unmapped code.
+# ---------------------------------------------------------------------------
+print("\n033B weekly surveillance script")
+surv = {}
+for os_key in ("windows", "macos", "linux"):
+    name, text = gen.generate("SURV", "2026W35", os_key, "Weekly", "033B")
+    surv[os_key] = text
+    check(f"{os_key}: filename carries the week", name,
+          f"jrrh_extract_surv_2026W35.{gen.OS_CHOICES[os_key]['ext']}")
+    check(f"{os_key}: names the week in words", "Week 35" in text or "24 Aug" in text, True)
+    check(f"{os_key}: writes the two-column tally the compiler expects",
+          "Code" in text and "Value" in text, True)
+
+for os_key in ("macos", "linux"):
+    try:
+        compile(surv[os_key], "surv", "exec")
+        check(f"{os_key}: compiles", True, True)
+    except SyntaxError as exc:
+        check(f"{os_key}: compiles", f"SyntaxError line {exc.lineno}", True)
+
+print("\nThe week is ISO-8601 and is baked in")
+check("week 35 of 2026 starts Monday 24 August", "'2026-08-24'" in surv["linux"], True)
+check("and ends exclusive at 31 August", "'2026-08-31'" in surv["linux"], True)
+check("no neighbouring week leaks in",
+      any(d in surv["linux"] for d in ("2026-08-17", "2026-09-07")), False)
+_, w01 = gen.generate("SURV", "2026W01", "linux", "Weekly", "033B")
+check("week 1 of 2026 begins in December 2025, per ISO-8601",
+      "'2025-12-29'" in w01, True)
+_, w53 = gen.generate("SURV", "2026W53", "linux", "Weekly", "033B")
+check("2026 has a week 53", "'2026-12-28'" in w53, True)
+
+print("\nThe surveillance SQL is read-only and returns one grid")
+ssql = gen.surv_sql(date(2026, 8, 24), date(2026, 8, 31))
+for word in ("UPDATE", "DELETE", "ALTER", "TRUNCATE", "EXEC", "MERGE"):
+    check(f"no {word}", re.search(rf"\b{word}\b", ssql, re.I) is not None, False)
+check("writes only to temp tables",
+      [t for t in re.findall(r"INSERT INTO (\S+)", ssql) if not t.startswith("#")], [])
+check("drops only temp tables",
+      [t for t in re.findall(r"DROP TABLE (\S+)", ssql) if not t.startswith("#")], [])
+check("one result grid", len(re.findall(r"^SELECT Code, Value", ssql, re.M)), 1)
+
+print("\nEvery emitted code is a real 033B element")
+# Verified against hmis.health.go.ug on 3 September 2026: 033B-AP01 OPD New,
+# AP02 Total OPD, MA02 Cases Tested with RDT, MA03 RDT Positive Cases,
+# MA04 Cases Tested with Microscopy, MA05 Microscopy Positive Cases,
+# GP01 No. of samples tested, GP02 No. of samples rejected, GP03 Total MTB
+# detected, GP04 Total No. Rif R, GP05 No. of errors/invalid results.
+emitted = sorted(set(re.findall(r"SELECT '([A-Z]{2}\d{2})'", ssql)))
+check("the emitted indicator codes are exactly those confirmed on the instance",
+      emitted, ["AP01", "AP02", "GP01", "GP02", "GP03", "GP04", "GP05",
+                "MA02", "MA03", "MA04", "MA05"])
+meta = sorted(set(re.findall(r"'(_[a-z_]+)'", ssql)))
+check("metadata rows are underscore-prefixed so the compiler skips them",
+      all(m.startswith("_") for m in meta) and len(meta) >= 3, True)
+
+print("\nThe corrections that cost three round trips must not regress")
+check("new attendance is the first visit in the period, not a category name",
+      "ROW_NUMBER() OVER (PARTITION BY PatientNo" in ssql, True)
+check("the visit category no longer decides attendance",
+      "VisitCategoryID" in ssql, False)
+check("results are read from the child table, where the values are",
+      ("LabResultsEXT" in ssql, re.search(r"\bdbo\.LabResults\b", ssql) is not None),
+      (True, False))
+check("only the clause before the first comma is classified",
+      "CHARINDEX(','" in ssql, True)
+check("negatives are matched before positives",
+      ssql.index("NON REACTIVE") < ssql.index("'%REACTIVE%'"), True)
+check("the controlled list's misspelling is accepted", "POSTIVE" in ssql, True)
+check("tested means resulted, which is what the form asks",
+      ssql.count("Verdict IS NOT NULL") >= 3, True)
+check("the rejection code is the confirmed one", "'54N'" in ssql, True)
+
+print("\nReports without a script refuse, and say why")
+for rt, fragment in [("IPD", "have not been confirmed"),
+                     ("HTS", "PreTestingCounseling"),
+                     ("MCH", "No compiler yet")]:
+    check(f"{rt} refuses with its reason",
+          refuses(lambda rt=rt: gen.generate(rt, "202607", "linux", "Monthly", "x"),
+                  fragment), True)
+check("every non-scriptable report has a stated reason",
+      sorted(gen.NOT_SCRIPTABLE) , ["HIV", "HTS", "IPD", "MCH", "PALL", "TBL"])
+check("scriptable and non-scriptable together cover every registered report",
+      sorted(gen.SCRIPTABLE | set(gen.NOT_SCRIPTABLE)),
+      ["HIV", "HTS", "IPD", "MCH", "OPD", "PALL", "SURV", "TBL"])

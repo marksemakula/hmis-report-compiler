@@ -51,7 +51,10 @@ export default function ExtractScripts() {
   }, [router]);
 
   const current = useMemo(() => types.find((t) => t.type === report) || null, [types, report]);
-  const scriptable = options ? types.filter((t) => options.reports.includes(t.type)) : [];
+  const currentStatus = useMemo(
+    () => (options?.reportStatus || []).find((r) => r.type === report) || null,
+    [options, report]);
+  const canDownload = !currentStatus || currentStatus.available;
   const [year, ordinal] = current ? splitPeriod(current.periodType, period) : [0, 0];
 
   const ordinalOptions = () => {
@@ -109,13 +112,35 @@ export default function ExtractScripts() {
         <div className="grid cols-2">
           <div>
             <label>Report</label>
+            {/* All eight reports are listed. The ones without a script are
+                disabled and carry their reason below, because a report that is
+                simply absent reads as a fault in the app rather than as work
+                not yet done. */}
             <select value={report} onChange={(e) => {
               const t = types.find((x) => x.type === e.target.value);
               setReport(e.target.value);
               if (t) setPeriod(t.defaultPeriod);
             }}>
-              {scriptable.map((t) => <option key={t.type} value={t.type}>{t.label}</option>)}
+              <optgroup label="Script available">
+                {(options?.reportStatus || []).filter((r) => r.available).map((r) => (
+                  <option key={r.type} value={r.type}>
+                    {r.label} · {r.periodType.toLowerCase()}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="Not yet — upload only">
+                {(options?.reportStatus || []).filter((r) => !r.available).map((r) => (
+                  <option key={r.type} value={r.type} disabled>
+                    {r.label} · {r.periodType.toLowerCase()}
+                  </option>
+                ))}
+              </optgroup>
             </select>
+            {currentStatus && !currentStatus.available && (
+              <p style={{ color: 'var(--muted)', fontSize: 12.5, marginTop: 6 }}>
+                {currentStatus.reason}
+              </p>
+            )}
           </div>
           {current && (
             <div className="grid cols-2">
@@ -135,10 +160,15 @@ export default function ExtractScripts() {
             </div>
           )}
         </div>
-        {types.length > scriptable.length && (
+        {current && canDownload && (
           <p style={{ color: 'var(--muted)', fontSize: 12.5, marginBottom: 0 }}>
-            Scripts exist for {scriptable.map((t) => t.short).join(', ')} so far. The other
-            reports still need an uploaded extract.
+            {current.periodType === 'Weekly'
+              ? 'Weeks run Monday to Sunday on the ISO-8601 calendar, the same rule DHIS2 uses.'
+              : current.periodType === 'Quarterly'
+              ? 'Quarters follow the calendar year: Q1 is January to March.'
+              : 'Months are calendar months.'}{' '}
+            The period is written into the query, so a script downloaded for one
+            period cannot be run against another.
           </p>
         )}
       </div>
@@ -171,13 +201,20 @@ export default function ExtractScripts() {
         <h2>3 · Download and run</h2>
         <p style={{ color: 'var(--muted)', marginTop: 0 }}>
           The period is written into the script, so it cannot be run against the wrong
-          month by accident. It aggregates before it writes: the file contains counts by
-          age band, sex and visit type — no patient names, numbers or dates of birth.
+          period by accident. It aggregates before it writes: {report === 'SURV'
+            ? 'the file contains one line per indicator code — a count, and nothing else.'
+            : 'the file contains counts by age band, sex and visit type — no patient names, numbers or dates of birth.'}
         </p>
-        {href && (
+        {href && canDownload && (
           <a className="btn" href={href} download>
             Download {runtime} script for {current?.short} · {period}
           </a>
+        )}
+        {!canDownload && (
+          <div className="alert info" style={{ marginTop: 0 }}>
+            No script for {current?.short} yet. {currentStatus?.reason} Until there is
+            one, compile this report by uploading an extract on the Compile page.
+          </div>
         )}
         <div style={{ marginTop: 18, fontSize: 13.5 }}>
           <strong>Then, on the hospital network:</strong>
