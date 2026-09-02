@@ -1,4 +1,4 @@
-"""DHIS2 integration — authentication, metadata checks and dataValueSet submission."""
+"""DHIS2 integration - authentication, metadata checks and dataValueSet submission."""
 import os
 import time
 from datetime import date
@@ -65,7 +65,7 @@ def preflight(report_type: str = "OPD", org_unit: str = None):
     auths = set(me.get("authorities", []))
     checks["canAddDataValues"] = "ALL" in auths or "F_DATAVALUE_ADD" in auths
 
-    # 2. Is the data set assigned to this org unit? (filtered query — cheap even on a national instance)
+    # 2. Is the data set assigned to this org unit? (filtered query - cheap even on a national instance)
     r = s.get(f"{b}/api/dataSets.json?filter=id:eq:{ds_id}&filter=organisationUnits.id:eq:{ou_id}&fields=id", timeout=30)
     r.raise_for_status()
     checks["dataSetAssignedToOrgUnit"] = len(r.json().get("dataSets", [])) > 0
@@ -115,7 +115,7 @@ def resolve_attribute_option_combo(ds_id: str, session=None):
     r.raise_for_status()
     cc = r.json().get("categoryCombo", {})
     if cc.get("isDefault", True):
-        return None  # default combo — DHIS2 handles it implicitly
+        return None  # default combo - DHIS2 handles it implicitly
     options = cc.get("categoryOptionCombos", [])
     wanted = os.environ.get("DHIS2_AOC", "").strip()
     if wanted:
@@ -147,7 +147,7 @@ def build_payload(report_type: str, period: str, data_values: list, org_unit: st
         "orgUnit": org_unit or m["orgUnit"]["id"],
         # Imputed zeros are a rendering device and must never be submitted.
         # They are added by coverage.zero_fill for the preview only, and are
-        # never persisted, so in practice none reach here — this filter exists
+        # never persisted, so in practice none reach here - this filter exists
         # so that a future caller who passes the displayed values by mistake
         # gets the right payload rather than a silent misreport.
         #
@@ -178,8 +178,8 @@ def submit(payload: dict, max_retries: int = 3, dry_run: bool = False):
 
     With dry_run, DHIS2 validates the payload and returns the identical import
     summary it would have produced, but writes nothing. Every conflict a real
-    submission would raise — unknown element, closed period, missing capture
-    right — surfaces exactly as it would, which makes this the safe way to
+    submission would raise - unknown element, closed period, missing capture
+    right - surfaces exactly as it would, which makes this the safe way to
     exercise the whole path against the live national instance."""
     s = _session()
     url = f"{base_url()}/api/dataValueSets"
@@ -195,7 +195,7 @@ def submit(payload: dict, max_retries: int = 3, dry_run: bool = False):
             except ValueError:
                 body = {"raw": r.text[:2000]}
             if r.status_code in (200, 201, 409):
-                # 409 returns import summary with conflicts — surface it rather than retry
+                # 409 returns import summary with conflicts - surface it rather than retry
                 summary = body.get("response", body)
                 counts = summary.get("importCount", {})
                 imported = int(counts.get("imported", 0) or 0)
@@ -209,7 +209,7 @@ def submit(payload: dict, max_retries: int = 3, dry_run: bool = False):
                 if not accepted and ignored > 0:
                     reasons = "; ".join(f"{c.get('object', '?')}: {c.get('value', '?')}" for c in conflicts[:5])
                     description = (
-                        f"DHIS2 accepted the request but ignored all {ignored} value(s) — nothing was written. "
+                        f"DHIS2 accepted the request but ignored all {ignored} value(s) - nothing was written. "
                         f"{('Conflicts: ' + reasons) if reasons else 'No conflict details returned; check that the data set is assigned to the org unit, the period is open, and your user has data capture rights for it.'}"
                     )
                 return {

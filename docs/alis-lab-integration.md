@@ -16,19 +16,19 @@ the integration itself.
 
 ## The wire format
 
-**Request** — a FHIR transaction bundle. Three top-level keys, present on all
+**Request** - a FHIR transaction bundle. Three top-level keys, present on all
 2,000 messages sampled:
 
 | Key | JSON type |
 |---|---|
-| `resourceType` | string — `"Bundle"` |
-| `type` | string — `"transaction"` |
+| `resourceType` | string - `"Bundle"` |
+| `type` | string - `"transaction"` |
 | `entry` | array of objects |
 
 Median payload is 7,988 bytes; the largest seen is 19,713. 103,171 of the
 104,137 stored messages are valid JSON.
 
-**Response** — a FHIR transaction-response bundle:
+**Response** - a FHIR transaction-response bundle:
 
 ```json
 {
@@ -66,12 +66,12 @@ identifier and hands it back. That is the handle for retrieving results later.
 **The bundle `id` never changes.** Every one of the 103,171 responses carries
 `fd2b6165-990f-477b-87ed-e4aa1c5f5098`. A transaction-response bundle is meant
 to be uniquely identified; ALIS appears to be returning a hardcoded constant.
-Harmless to us — we key on the entry ids — but worth reporting to CPHL, since
+Harmless to us - we key on the entry ids - but worth reporting to CPHL, since
 it makes their own responses impossible to correlate.
 
 ### The empty-entry response
 
-97,908 of the responses have `"entry": []` — accepted, but nothing created.
+97,908 of the responses have `"entry": []` - accepted, but nothing created.
 Only a few dozen carry entries. This needs one confirmation before we rely on
 it: the most likely reading is that a bundle is posted once per specimen
 carrying all of its tests, the same response text is stamped onto each of that
@@ -101,8 +101,8 @@ already stored costs nothing and is available today.
 
 | Table | Rows | Grain |
 |---|---|---|
-| `LabResults` | 28,228 | one row per test — **the clinical record** |
-| `LabResultsEXT` | 250,701 | one row per analyte — **where the values are** |
+| `LabResults` | 28,228 | one row per test - **the clinical record** |
+| `LabResultsEXT` | 250,701 | one row per analyte - **where the values are** |
 | `INTLabResults` | 28,214 | integration staging |
 | `INTLabResultsEXT` | 250,701 | integration staging |
 | `INTTestCMIntegrationResponse` | 333,895 | raw `payloadmsg` |
@@ -111,14 +111,14 @@ Read the unprefixed pair. The `INT` tables are integration staging; `LabResults`
 holds fourteen results the integration never carried.
 
 **The value is not on the parent row.** `LabResults.Result` is blank for every
-reportable test — 3,724 empty malaria smears, 222 empty HIV serologies. The
+reportable test - 3,724 empty malaria smears, 222 empty HIV serologies. The
 parent is a container and the value sits one level down in `LabResultsEXT`, one
 row per analyte. The proof is in the same output: sub-test `01 Detection`
 appears exactly 3,724 times, matching the blank malaria parents one for one.
-`ResultFlagID` is no help either — it is `104NA` on all 28,214 rows.
+`ResultFlagID` is no help either - it is `104NA` on all 28,214 rows.
 
 **The join back to a visit holds.** `LabRequests` carries both `SpecimenNo` and
-`VisitNo`, and 28,191 of the 28,214 results reconcile to it — 99.9 per cent. So
+`VisitNo`, and 28,191 of the 28,214 results reconcile to it - 99.9 per cent. So
 `LabResults → LabRequests → Visits → Patients` yields the age and sex every
 laboratory cell on an HMIS form is disaggregated by. `LabRequestsIPD` (46,805
 rows) carries a specimen but no visit and reaches the patient by some other
@@ -161,8 +161,8 @@ concept exists and local otherwise. Those that matter to the HMIS forms:
 
 Two things follow. The HIV drug-resistance count of 2 independently corroborates
 the HIVDR data-call return, which reported one result in 2025 and one in 2026.
-And HIV testing volume is *not* principally in the laboratory tables — 222
-serologies against 2,198 rows in `PreTestingCounseling` — so HMIS 105:04-05 must
+And HIV testing volume is *not* principally in the laboratory tables - 222
+serologies against 2,198 rows in `PreTestingCounseling` - so HMIS 105:04-05 must
 be compiled from the HTS tables, not from the lab.
 
 ## A defect worth reporting to the ClinicMaster vendor
@@ -189,8 +189,8 @@ plausibly a regression from the 6.5.0 upgrade.
 
 Three findings from the Ignition debug page the application served publicly:
 
-- Laravel **6.20.45** — security support ended September 2022.
-- PHP **7.4.3** — security support ended November 2022.
+- Laravel **6.20.45** - security support ended September 2022.
+- PHP **7.4.3** - security support ended November 2022.
 - `APP_DEBUG` is **enabled in production**. The exception page exposes the
   environment, including database credentials, to any unauthenticated visitor
   who triggers an error. This is the most urgent of the three.
@@ -201,7 +201,7 @@ specification we have had to reverse-engineer.
 
 ## Handling rules that apply to this work
 
-- `INTLabRequestDetails.JsonMessage` contains patient data — names, numbers,
+- `INTLabRequestDetails.JsonMessage` contains patient data - names, numbers,
   dates of birth. Script 10 reads key names only and never values. Any future
   script that touches it must do the same.
 - The ALIS account credential supplied in conversation should be rotated. It is

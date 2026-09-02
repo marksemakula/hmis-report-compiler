@@ -52,9 +52,9 @@ export default function Reports() {
       </div>
       {detail && (
         <div className="card">
-          <h2>Report {detail.id} — {detail.type} · {detail.period}</h2>
+          <h2>Report {detail.id} - {detail.type} · {detail.period}</h2>
           {detail.push_response && (
-            <div className="alert info">DHIS2 response: {detail.push_response.status} — imported {detail.push_response.importCount?.imported ?? 0}, updated {detail.push_response.importCount?.updated ?? 0}, ignored {detail.push_response.importCount?.ignored ?? 0}</div>
+            <div className="alert info">DHIS2 response: {detail.push_response.status} - imported {detail.push_response.importCount?.imported ?? 0}, updated {detail.push_response.importCount?.updated ?? 0}, ignored {detail.push_response.importCount?.ignored ?? 0}</div>
           )}
           <div style={{ maxHeight: 420, overflow: 'auto', border: '1px solid var(--line)', borderRadius: 8 }}>
             <table>

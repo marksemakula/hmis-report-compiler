@@ -182,7 +182,7 @@ def _collapse_emr_visits(dict_rows):
 
     The facility records more than one diagnosis for a single visit and the
     Ministry counts every one of them, so collapsing to a single diagnosis per
-    visit — as this did previously — silently dropped every co-diagnosis.
+    visit - as this did previously - silently dropped every co-diagnosis.
 
     Attendance is a different question: a visit is one attendance however many
     conditions were recorded at it. Only the first row for a visit therefore

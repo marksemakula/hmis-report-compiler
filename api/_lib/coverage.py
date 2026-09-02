@@ -11,7 +11,7 @@ cannot be done by sending zeros, because DHIS2 will not keep them:
 
 The zero is not rejected, not ignored, not flagged as a conflict. It is dropped
 in silence. The cause is `zeroIsSignificant`, which is false on 3,247 of the
-3,252 data elements across the eight data sets — the five exceptions are all
+3,252 data elements across the eight data sets - the five exceptions are all
 cold-chain and condom counts on 105:02-03. Consistent with that, six
 data-set/period combinations at this facility hold 2,038 stored values between
 them and not one of them is a zero.
@@ -26,8 +26,8 @@ WHICH LEAVES THE REAL QUESTION
 A zero is a claim. Printing 0 against "Cholera - Deaths" says we looked and
 there were none. We may only make that claim for cells this compiler actually
 computes. Everything else must stay visibly blank, because 105:01 alone carries
-6,329 cells of which the OPD compiler answers for 4,060; the rest — nutrition,
-rehabilitation, gender-based violence, cancer — are filled by other staff from
+6,329 cells of which the OPD compiler answers for 4,060; the rest - nutrition,
+rehabilitation, gender-based violence, cancer - are filled by other staff from
 paper registers, and a zero of ours printed in their column is a lie about their
 work.
 
@@ -46,7 +46,7 @@ def _opd_owned() -> set:
     105:01, and it separates it cleanly: of the form's 623 elements, 406 carry
     it and they are exactly attendance plus the thirty condition groups.
     Elements on the *default* combination are writable by the compiler when a
-    diagnosis maps to one, but they are not zero-filled — a blank there is a
+    diagnosis maps to one, but they are not zero-filled - a blank there is a
     question we have not asked, not an answer of none."""
     m = mapping()
     des = m["dataElements"].get("HMIS105_01", {})
@@ -107,7 +107,7 @@ def owned_elements(report_type: str) -> set:
         return fn()
     except Exception:
         # Ownership is an aid to reading the form. If the metadata needed to
-        # compute it is unavailable, the preview must still render — it simply
+        # compute it is unavailable, the preview must still render - it simply
         # falls back to showing blanks, which understates rather than misleads.
         return set()
 
@@ -144,7 +144,7 @@ def zero_fill(values: list, report_type: str) -> tuple:
     Returns (values_for_display, summary). The zeros are marked `imputed` so
     that the renderer can show them differently and, more importantly, so that
     nothing downstream mistakes them for measurements. They are never added to
-    the payload that goes to DHIS2 — see the module docstring for why that
+    the payload that goes to DHIS2 - see the module docstring for why that
     would be pointless as well as wrong."""
     owned = owned_elements(report_type)
     have = {(v.get("dataElement"), v.get("categoryOptionCombo")) for v in (values or [])}

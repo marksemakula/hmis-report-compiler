@@ -65,7 +65,7 @@ def describe_week(period: str) -> str:
     if not b:
         return period
     start, end = b
-    return f"{period} ({start.strftime('%d %b')} – {end.strftime('%d %b %Y')})"
+    return f"{period} ({start.strftime('%d %b')} - {end.strftime('%d %b %Y')})"
 
 
 # ---------------------------------------------------------------- monthly
@@ -151,7 +151,7 @@ def describe(period_type: str, period: str) -> str:
         year, q = parsed
         first = MONTHS[3 * (q - 1)]
         last = MONTHS[3 * (q - 1) + 2]
-        return f"Q{q} {year} ({first}–{last})"
+        return f"Q{q} {year} ({first}-{last})"
     return period
 
 

@@ -36,7 +36,7 @@ def current_user(request: Request) -> dict:
     try:
         return jwt.decode(token, _secret(), algorithms=[JWT_ALGO])
     except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Session expired — please sign in again")
+        raise HTTPException(status_code=401, detail="Session expired - please sign in again")
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid session")
 

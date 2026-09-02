@@ -64,7 +64,7 @@ check("december bounds roll the year", periods.month_bounds("202612"), (date(202
 
 check("quarterly parse", periods.parse("Quarterly", "2026Q3"), (2026, 3))
 check("quarterly Q5 rejected", periods.parse("Quarterly", "2026Q5"), None)
-check("quarterly describe", periods.describe("Quarterly", "2026Q3"), "Q3 2026 (July–September)")
+check("quarterly describe", periods.describe("Quarterly", "2026Q3"), "Q3 2026 (July-September)")
 check("quarterly bounds", periods.quarter_bounds("2026Q1"), (date(2026, 1, 1), date(2026, 3, 31)))
 check("Q4 bounds roll the year", periods.quarter_bounds("2026Q4"), (date(2026, 10, 1), date(2026, 12, 31)))
 

@@ -45,13 +45,13 @@ kept a hundred, and every one of those reports would be wrong.
 | Report | Elements | Cells | Cells this compiler answers for |
 |---|---|---:|---:|
 | 105:01 OPD | 623 | 6,329 | 4,060 |
-| 105:02-03 MCH | 432 | 1,433 | — no compiler yet |
-| 105:04-05 HTS | 190 | 5,830 | — no compiler yet |
-| 105C Palliative | 24 | 240 | — no compiler yet |
+| 105:02-03 MCH | 432 | 1,433 | - no compiler yet |
+| 105:04-05 HTS | 190 | 5,830 | - no compiler yet |
+| 105C Palliative | 24 | 240 | - no compiler yet |
 | 108 IPD | 849 | 3,906 | ward indicators + Section 6 |
 | 033B Surveillance | 239 | 239 | 239 |
-| 106a:01-02 HIV | 368 | 7,219 | — no compiler yet |
-| 106a:03 TB/Leprosy | 527 | 2,518 | — no compiler yet |
+| 106a:01-02 HIV | 368 | 7,219 | - no compiler yet |
+| 106a:03 TB/Leprosy | 527 | 2,518 | - no compiler yet |
 
 And what is filled today, by anyone, through the existing manual process:
 
@@ -70,10 +70,10 @@ July.
 
 ## The second reason not to zero everything
 
-A zero is a claim. Printing `0` against *Cholera — Deaths* asserts that we
+A zero is a claim. Printing `0` against *Cholera - Deaths* asserts that we
 looked and there were none.
 
-105:01 carries 6,329 cells. This compiler answers for 4,060 of them — attendance
+105:01 carries 6,329 cells. This compiler answers for 4,060 of them - attendance
 and the diagnosis grid. The remaining 2,269 are nutrition (1,474 cells),
 rehabilitation, gender-based violence, cancer and adverse events, and they are
 filled by other staff from paper registers. A zero of ours in their column is a
@@ -86,18 +86,18 @@ overwritten their entry.
 of cells each compiler answers for from the compiler's own mapping tables, so
 extending a mapping extends the zero-fill and the two cannot drift apart.
 
-- **OPD** — the two attendance elements, plus every element on the
+- **OPD** - the two attendance elements, plus every element on the
   *OPD Age(0-28days+) & Sex* disaggregation. That combination separates the
   diagnosis grid from the rest of 105:01 cleanly: 406 of 623 elements carry it,
   and they are exactly attendance plus the thirty condition groups. Checked
   against the alternative of matching the code prefix in the element name, which
-  would have been wrong — `EP` has 25 elements inside the grid and one outside,
+  would have been wrong - `EP` has 25 elements inside the grid and one outside,
   `CA` 8 inside and 19 outside, `TP` 9 and 13.
-- **IPD** — the four ward indicators the compiler derives, plus every Section-6
+- **IPD** - the four ward indicators the compiler derives, plus every Section-6
   case and death element in the diagnosis index. `CI01` (beds available) is
   deliberately excluded: it is a facility declaration, and zero beds is not a
   thing to assert.
-- **033B** — all 239 elements. This is the report where the zero carries most
+- **033B** - all 239 elements. This is the report where the zero carries most
   weight, because "no cases of cholera this week" is the substance of a
   surveillance return rather than an absence of data.
 - **The other five reports** own nothing, because they have no compiler. Their
@@ -110,7 +110,7 @@ distinguishable on the page:
 |---|---|
 | bold, on a tinted ground | counted from the register |
 | plain grey `0` | this compiler answers for the cell and found none |
-| blank | not compiled here — entered by other staff from another register |
+| blank | not compiled here - entered by other staff from another register |
 
 A compiled zero and an imputed zero print the same character, so the difference
 is carried in the data rather than inferred from the value, and a legend on the

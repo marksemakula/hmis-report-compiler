@@ -7,20 +7,20 @@ import { describeError, isoWeek, isoWeekMonday, weeksInYear, weekLabel } from '.
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
 const REPORTS = {
-  OPD:  { label: 'eHMIS 105:01 — Outpatient (OPD)',        cadence: 'monthly' },
-  IPD:  { label: 'eHMIS 108 — Inpatient (IPD)',            cadence: 'monthly' },
-  SURV: { label: 'eHMIS 033B — Weekly Surveillance',       cadence: 'weekly'  },
+  OPD:  { label: 'eHMIS 105:01 - Outpatient (OPD)',        cadence: 'monthly' },
+  IPD:  { label: 'eHMIS 108 - Inpatient (IPD)',            cadence: 'monthly' },
+  SURV: { label: 'eHMIS 033B - Weekly Surveillance',       cadence: 'weekly'  },
 };
 
-/* The same week, worded for a sentence rather than a dropdown: "24 Aug –
+/* The same week, worded for a sentence rather than a dropdown: "24 Aug -
    30 Aug 2026" reads better inside "Submit this report for …" than the ISO
-   form does. Two presentations, one arithmetic — isoWeekMonday in app/lib.js,
+   form does. Two presentations, one arithmetic - isoWeekMonday in app/lib.js,
    checked against the server for every week from 2015 to 2035. */
 function weekRange(year, week) {
   const monday = isoWeekMonday(year, week);
   const sunday = new Date(monday.getTime() + 6 * 86400000);
   const fmt = (d) => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
-  return `${fmt(monday)} – ${fmt(sunday)} ${sunday.getUTCFullYear()}`;
+  return `${fmt(monday)} - ${fmt(sunday)} ${sunday.getUTCFullYear()}`;
 }
 
 export default function Workflow() {
@@ -253,7 +253,7 @@ export default function Workflow() {
             )}
           </div>
           <p style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 0 }}>
-            Reporting period: <strong>{period}</strong> — {periodLabel}
+            Reporting period: <strong>{period}</strong> - {periodLabel}
           </p>
           <div style={{ marginTop: 16 }}>
             <label>Where should the data come from?</label>
@@ -300,11 +300,11 @@ export default function Workflow() {
               <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: 14 }}>
                 The request is queued for the extraction agent running inside the hospital.
                 It runs a read-only query against ClinicMaster, aggregates on site, and returns
-                counts only — no patient-level data leaves the hospital network.
+                counts only - no patient-level data leaves the hospital network.
               </p>
               {job && (
                 <div className={`alert ${job.state === 'FAILED' ? 'error' : 'info'}`}>
-                  Job #{job.id} — {job.state.toLowerCase()}
+                  Job #{job.id} - {job.state.toLowerCase()}
                   {job.note ? `. ${job.note}` : '.'}
                 </div>
               )}
@@ -340,7 +340,7 @@ export default function Workflow() {
             <div style={{ marginTop: 14 }}>
               {upload.consistency.map((c, i) => (
                 <div key={i} className={`alert ${c.severity === 'error' ? 'error' : 'warn'}`}>
-                  <b>{c.severity === 'error' ? 'Cannot be right' : 'Worth checking'}</b> — {c.message}
+                  <b>{c.severity === 'error' ? 'Cannot be right' : 'Worth checking'}</b> - {c.message}
                 </div>
               ))}
             </div>
@@ -349,7 +349,7 @@ export default function Workflow() {
             <>
               <div className="alert info">
                 {weekly
-                  ? 'Lines with errors are excluded. Blank values are not errors — they simply mean the indicator was not reported this week.'
+                  ? 'Lines with errors are excluded. Blank values are not errors - they simply mean the indicator was not reported this week.'
                   : 'Rows with errors are excluded from compilation. You may proceed, or correct the file and upload it again.'}
               </div>
               <table>
@@ -373,7 +373,7 @@ export default function Workflow() {
 
       {step === 2 && report && (
         <div className="card">
-          <h2>Compiled report preview — {REPORTS[reportType].label} · {periodLabel}</h2>
+          <h2>Compiled report preview - {REPORTS[reportType].label} · {periodLabel}</h2>
           <p style={{ color: 'var(--muted)', marginTop: 0 }}>Facility: {report.facility_name} · {report.compiled_data.length} data values</p>
           {compiled.unmapped?.length > 0 && (
             <div className="alert info">
@@ -397,7 +397,7 @@ export default function Workflow() {
           </div>
           {dryResult && (
             <div className={`alert ${dryResult.accepted ? 'success' : 'error'}`} style={{ marginTop: 14 }}>
-              <strong>Dry run — nothing was written.</strong>{' '}
+              <strong>Dry run - nothing was written.</strong>{' '}
               {dryResult.accepted
                 ? `DHIS2 validated all ${report.compiled_data.length} values and would accept this submission `
                   + `(imported ${dryResult.importCount?.imported ?? 0}, updated ${dryResult.importCount?.updated ?? 0}).`
@@ -434,7 +434,7 @@ export default function Workflow() {
           <div className="kpis">
             {['imported', 'updated', 'ignored', 'deleted'].map((k) => (
               <div className="kpi" key={k}>
-                <div className="n">{pushResult.result?.importCount?.[k] ?? '—'}</div>
+                <div className="n">{pushResult.result?.importCount?.[k] ?? '-'}</div>
                 <div className="l">{k}</div>
               </div>
             ))}

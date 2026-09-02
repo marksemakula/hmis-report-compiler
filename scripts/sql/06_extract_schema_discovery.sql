@@ -1,5 +1,5 @@
 /* ==================================================================
-   HMIS REPORT COMPILER — EXTRACTION, STEP A: SCHEMA DISCOVERY
+   HMIS REPORT COMPILER - EXTRACTION, STEP A: SCHEMA DISCOVERY
    ------------------------------------------------------------------
    Server   : 172.20.0.230
    Database : ClinicMasterMOH

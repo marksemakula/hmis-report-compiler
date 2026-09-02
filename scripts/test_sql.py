@@ -9,7 +9,7 @@ measured in hours. Two classes of mistake have already happened:
   2. A static reference to a column that did not exist. That one is worse than
      it sounds: an invalid column name is a COMPILE-time binding error, and SQL
      Server binds the whole batch before running any of it. TRY/CATCH does not
-     help — the entire script failed and returned nothing, including the six
+     help - the entire script failed and returned nothing, including the six
      sections that were correct.
 
 So the rules enforced here are: anything touching a table whose shape we have
@@ -131,7 +131,7 @@ for name in scripts:
 
     # --- one grid ----------------------------------------------------------
     # Azure Data Studio saves one grid per CSV, so a script returning several
-    # loses all but the first — which cost two round trips before every script
+    # loses all but the first - which cost two round trips before every script
     # was made to return exactly one. A SELECT returns a grid unless it is
     # feeding an INSERT or assigning to a variable, so those are stripped and
     # what remains must be a single statement-initial SELECT.

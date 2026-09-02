@@ -123,7 +123,7 @@ export default function ExtractScripts() {
                   </option>
                 ))}
               </optgroup>
-              <optgroup label="Not yet — upload only">
+              <optgroup label="Not yet - upload only">
                 {(options?.reportStatus || []).filter((r) => !r.available).map((r) => (
                   <option key={r.type} value={r.type} disabled>
                     {r.label} · {r.periodType.toLowerCase()}
@@ -173,7 +173,7 @@ export default function ExtractScripts() {
         <p style={{ color: 'var(--muted)', marginTop: 0 }}>
           Two read-only scripts that describe ClinicMaster rather than extract a report.
           Run either on the hospital network and send the file back; they return
-          reference data only — table columns, lookup values, the disease dictionary —
+          reference data only - table columns, lookup values, the disease dictionary -
           and read no patient row.
         </p>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
@@ -187,7 +187,7 @@ export default function ExtractScripts() {
         </div>
         {(options?.utilities || []).map((u) => (
           <p key={u.key} style={{ color: 'var(--muted)', fontSize: 12.5, margin: '8px 0 0' }}>
-            <strong>{u.label}</strong> — {u.note}
+            <strong>{u.label}</strong> - {u.note}
           </p>
         ))}
       </div>
@@ -197,8 +197,8 @@ export default function ExtractScripts() {
         <p style={{ color: 'var(--muted)', marginTop: 0 }}>
           The period is written into the script, so it cannot be run against the wrong
           period by accident. It aggregates before it writes: {report === 'SURV'
-            ? 'the file contains one line per indicator code — a count, and nothing else.'
-            : 'the file contains counts by age band, sex and visit type — no patient names, numbers or dates of birth.'}
+            ? 'the file contains one line per indicator code - a count, and nothing else.'
+            : 'the file contains counts by age band, sex and visit type - no patient names, numbers or dates of birth.'}
         </p>
         {href && canDownload && (
           <a className="btn" href={href} download>
@@ -225,7 +225,7 @@ export default function ExtractScripts() {
         </div>
         <div className="alert info" style={{ marginTop: 16 }}>
           You need a <strong>read-only</strong> SQL login on ClinicMaster. Do not use an
-          account with write rights — the script only ever reads, but a read-only account
+          account with write rights - the script only ever reads, but a read-only account
           means the question never arises.
         </div>
       </div>

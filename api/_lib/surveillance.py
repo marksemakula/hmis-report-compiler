@@ -1,4 +1,4 @@
-"""HMIS 033B — Weekly Epidemiological Surveillance Report.
+"""HMIS 033B - Weekly Epidemiological Surveillance Report.
 
 Unlike 105:01 and 108, which are line-listed registers aggregated by age band
 and sex, 033B is a *tally* form. All 239 of its data elements sit on the
@@ -7,8 +7,8 @@ There is no disaggregation to compute.
 
 The import format is therefore a two-column tally (Code, Value) rather than a
 patient-level extract. Codes ClinicMaster can supply are pre-filled by the
-extraction queries under scripts/sql/; the remainder — tracer medicine and ARV
-stock balances, GeneXpert cartridges remaining, modules working — are keyed in,
+extraction queries under scripts/sql/; the remainder - tracer medicine and ARV
+stock balances, GeneXpert cartridges remaining, modules working - are keyed in,
 because no register holds them and no query can invent them.
 
 Code suffix convention used by the national instance:
@@ -60,7 +60,7 @@ def reset_index():
 
 def _clean_value(raw):
     """Return (value, error). Blank means 'not reported' and is skipped, which is
-    materially different from a reported zero — DHIS2 stores the two differently."""
+    materially different from a reported zero - DHIS2 stores the two differently."""
     text = str(raw if raw is not None else "").strip().replace(",", "")
     if text == "":
         return None, None
@@ -103,9 +103,9 @@ SUBSET_RULES = [
 # Two figures being exactly equal is not impossible, but in this report it has
 # so far always meant a filter that matched nothing. Warnings, not errors.
 EQUALITY_WARNINGS = [
-    ("AP01", "AP02", "every attendance is counted as new — check the "
+    ("AP01", "AP02", "every attendance is counted as new - check the "
                      "new-versus-repeat rule for the period"),
-    ("GP02", "GP01", "every GeneXpert sample is counted as rejected — check "
+    ("GP02", "GP01", "every GeneXpert sample is counted as rejected - check "
                      "the rejection code"),
 ]
 
@@ -174,7 +174,7 @@ def validate_surveillance_rows(rows: list, period: str):
         # tally codes: the period the extract actually covered, and how many
         # tests were ordered against how many were resulted. The extraction
         # script emits them so that a figure can be audited after the fact.
-        # They must be carried, not rejected — reported as unknown codes they
+        # They must be carried, not rejected - reported as unknown codes they
         # look like a data fault, and the obvious response is to delete the
         # very rows that explain the numbers.
         if code_raw.startswith(METADATA_PREFIX):

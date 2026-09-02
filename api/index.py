@@ -1,4 +1,4 @@
-"""HMIS Report Compiler — FastAPI backend (deployed as a Vercel Python function)."""
+"""HMIS Report Compiler - FastAPI backend (deployed as a Vercel Python function)."""
 import json
 import os
 import re
@@ -91,18 +91,17 @@ class UploadBody(BaseModel):
     period: str
 
 
-BLOB_URL_RE = re.compile(r"^https://[a-z0-9]+\\.(private|public)\\.blob\\.vercel-storage\\.com/")
-
-
+# Only a Vercel Blob URL may be fetched here. Without this the endpoint would
+# take any URL a caller supplied and retrieve it with our storage credential
+# attached, which is a request-forgery hole rather than a validation nicety.
+#
+# There were two definitions of this, one of them dead. The first wrote \\. in
+# a raw string, which matches a literal backslash and so matched no real URL at
+# all; it was harmless only because the second immediately replaced it. Deleting
+# the "duplicate" second line, which is the obvious tidy-up, would have silently
+# rejected every upload.
 BLOB_URL_RE = re.compile(r"^https://[a-z0-9]+\.(private|public)\.blob\.vercel-storage\.com/")
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
-
-
-class UploadBody(BaseModel):
-    blob_url: str
-    filename: str
-    report_type: str
-    period: str
 
 
 @app.post("/api/py/upload")
@@ -116,7 +115,7 @@ def upload(body: UploadBody, user: dict = Depends(current_user)):
     require_role(user, "data_officer")
     entry = report_type_entry(body.report_type)
     if not entry.get("compiler"):
-        err(f"{entry['short']} can be previewed but not yet compiled — no compiler "
+        err(f"{entry['short']} can be previewed but not yet compiled - no compiler "
             f"has been written for it. Reports that can be compiled today: "
             + ", ".join(sorted(k for k, v in mapping()["reportTypes"].items() if v.get("compiler"))))
     period = check_period(body.report_type, body.period)
@@ -233,7 +232,7 @@ def compile_report(body: CompileBody, user: dict = Depends(current_user)):
     if not values:
         err("Nothing to compile: no reported values fall within the selected period. "
             "For the weekly surveillance report, remember that a blank cell means "
-            "'not reported' and is skipped — enter 0 where the true count is zero.")
+            "'not reported' and is skipped - enter 0 where the true count is zero.")
 
     m = mapping()
     with db.get_conn() as conn:
@@ -538,7 +537,7 @@ def agent_heartbeat(body: dict, authorization: str = Header(default="")):
 @app.get("/api/py/agent/next")
 def agent_next_job(authorization: str = Header(default="")):
     """Hand the agent its next job. The response carries a report type and a
-    period and nothing else — never SQL. The queries live in the agent's own
+    period and nothing else - never SQL. The queries live in the agent's own
     package, so a compromised server cannot make it run arbitrary statements
     against a database of HIV records."""
     agentlib.require_agent(authorization)
@@ -688,7 +687,7 @@ def preview_status(report_type: str, period: str, user: dict = Depends(current_u
 def preview(report_type: str, period: str, user: dict = Depends(current_user)):
     """The official DHIS2 form for this report, rendered read-only with any
     compiled values in place. Served as a complete HTML document for a sandboxed
-    iframe — every field is an inert span and no script survives sanitisation."""
+    iframe - every field is an inert span and no script survives sanitisation."""
     entry = report_type_entry(report_type)
     period = check_period(report_type, period)
 

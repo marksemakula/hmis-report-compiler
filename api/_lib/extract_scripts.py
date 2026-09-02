@@ -9,14 +9,14 @@ Two properties are worth stating, because they are why the script is generated
 here rather than written by hand:
 
   * The period is baked in. A script downloaded for June 2026 cannot be run
-    against May by accident — the dates are literals in the SQL, derived from a
+    against May by accident - the dates are literals in the SQL, derived from a
     period the server has already validated.
   * The output is aggregated. The script writes counts by diagnosis, age band,
     sex and visit type. No patient row is written to disk, so nothing
     identifying can be uploaded, emailed or left in a Downloads folder.
 
 Windows gets PowerShell, which queries SQL Server through .NET with nothing
-installed — the decisive advantage on a locked-down hospital machine. macOS and
+installed - the decisive advantage on a locked-down hospital machine. macOS and
 Linux get Python, which those platforms almost always have.
 """
 import re
@@ -54,7 +54,7 @@ OS_CHOICES = {
 }
 
 # Reports a script can be generated for. Others are upload-only for now, and
-# the page lists them with the reason rather than hiding them — a report that
+# the page lists them with the reason rather than hiding them - a report that
 # is simply absent from the picker reads as a fault in the app.
 SCRIPTABLE = {"OPD", "SURV"}
 
@@ -64,7 +64,7 @@ NOT_SCRIPTABLE = {
     "IPD": "The admission and ward tables have not been confirmed yet. Writing "
            "the query against guessed column names is how the last three "
            "extracts failed, so this one waits for the schema.",
-    "MCH": "No compiler yet — a script would produce a file nothing can turn "
+    "MCH": "No compiler yet - a script would produce a file nothing can turn "
            "into data values.",
     "HTS": "No compiler yet. It will also need the HTS tables rather than the "
            "laboratory ones: HIV testing volume lives in PreTestingCounseling "
@@ -80,7 +80,7 @@ UTILITIES = {
     "profile": {
         "label": "Database profile",
         "note": "Table columns, row counts, lookup values and date coverage. "
-                "Reference data only — no patient row is read.",
+                "Reference data only - no patient row is read.",
         "output": "JRRH_clinicmaster_profile.csv",
     },
     "diseases": {
@@ -98,7 +98,7 @@ def opd_sql(start: date, end_exclusive: date) -> str:
 
     Confirmed against the live schema on 25 August 2026:
 
-      * Diagnosis has no VisitNo. It uses ClinicMaster's polymorphic pattern —
+      * Diagnosis has no VisitNo. It uses ClinicMaster's polymorphic pattern -
         ObjectName names the parent entity ('Visits', 'Admissions', 'IPDDoctor',
         'Deaths') and TreatmentNo is the key into it. OPD diagnoses are those
         with ObjectName = 'Visits'.
@@ -113,9 +113,9 @@ def opd_sql(start: date, end_exclusive: date) -> str:
 
     Two grains come back in one result, distinguished by the diagnosis column:
 
-      * rows where diagnosis = '(attendance)' count VISITS — one per visit,
+      * rows where diagnosis = '(attendance)' count VISITS - one per visit,
         for OA01/OA02
-      * every other row counts DIAGNOSES — a visit with three conditions
+      * every other row counts DIAGNOSES - a visit with three conditions
         recorded contributes three, which is what the Ministry asks for
 
     New versus re-attendance follows the Ministry rule: a client's first visit
@@ -162,7 +162,7 @@ GROUP BY b.age_years, b.sex, b.visit_category, d.DiseaseCode"""
 def profile_sql() -> str:
     """One read-only query describing the database's shape.
 
-    Catalogue views and small lookup distributions only — no patient row is
+    Catalogue views and small lookup distributions only - no patient row is
     returned, and nothing here reads a name, number or date of birth. Its
     purpose is to let the report queries be written against real column names
     instead of guesses."""
@@ -244,7 +244,7 @@ def surv_sql(start, end_exclusive) -> str:
       * AP01 counts a patient's FIRST visit within the week. It previously
         excluded visit categories by NAME, and the column holds codes
         (10C, 10O, 10R, 10RTT), so nothing was excluded and AP01 came back
-        equal to AP02 — 3,619 of 3,619.
+        equal to AP02 - 3,619 of 3,619.
       * Results are read from LabResultsEXT, not LabResults. The parent row
         is blank in 25,915 of 28,252 cases.
       * A result is classified from the clause before the first comma, because
@@ -378,7 +378,7 @@ DROP TABLE #res;
 
 
 def diseases_sql() -> str:
-    """The complete disease dictionary. Reference data, not patient data —
+    """The complete disease dictionary. Reference data, not patient data -
     it is the key to mapping ClinicMaster conditions onto HMIS 105 elements,
     and to seeing whether ICD-11 codes are actually populated."""
     return f"SELECT * FROM {DATABASE}.dbo.Diseases"
@@ -394,7 +394,7 @@ def script_name(report_type: str, period: str, os_key: str) -> str:
 
 # ---------------------------------------------------------------- PowerShell
 POWERSHELL = r'''<#
-    JRRH HMIS extraction — {report_label}
+    JRRH HMIS extraction - {report_label}
     Period: {period_label}   ({period})
     Generated: {generated}
 
@@ -403,7 +403,7 @@ POWERSHELL = r'''<#
 
         {output}
 
-    Upload that file on the Compile page. It contains counts only — no patient
+    Upload that file on the Compile page. It contains counts only - no patient
     names, numbers or dates of birth are written to disk.
 
     Requires nothing installed: PowerShell queries SQL Server through .NET.
@@ -493,7 +493,7 @@ Write-Host "Upload this file on the Compile page for {report_label}, {period_lab
 
 # ---------------------------------------------------------------- Python
 PYTHON = r'''#!/usr/bin/env python3
-"""JRRH HMIS extraction — {report_label}
+"""JRRH HMIS extraction - {report_label}
 Period: {period_label}   ({period})
 Generated: {generated}
 
@@ -502,7 +502,7 @@ read-only, aggregates here, and writes:
 
     {output}
 
-Upload that file on the Compile page. It contains counts only — no patient
+Upload that file on the Compile page. It contains counts only - no patient
 names, numbers or dates of birth are written to disk.
 
     pip install pymssql
@@ -616,7 +616,7 @@ if __name__ == "__main__":
 # no banding or mapping, so a single template serves both platforms' logic and
 # only the surrounding syntax differs.
 GENERIC_PS = r'''<#
-    JRRH ClinicMaster — {label}
+    JRRH ClinicMaster - {label}
     Generated: {generated}
 
     {note}
@@ -658,7 +658,7 @@ Write-Host "Send this file back so the report queries can be written against rea
 '''
 
 GENERIC_PY = r'''#!/usr/bin/env python3
-"""JRRH ClinicMaster — {label}
+"""JRRH ClinicMaster - {label}
 Generated: {generated}
 
 {note}
@@ -776,14 +776,14 @@ def generate(report_type: str, period: str, os_key: str, period_type: str,
         name = script_name(report_type, period, os_key)
         tpl = GENERIC_PS if os_key == "windows" else GENERIC_PY
         return name, tpl.format(
-            label=f"{report_label} — {describe(period_type, period)}",
+            label=f"{report_label} - {describe(period_type, period)}",
             note=("Weekly epidemiological surveillance tally for "
                   f"{describe(period_type, period)} ({period}). The week is "
                   "fixed in the query, so this script cannot be run against a "
                   "different one. It writes two columns, Code and Value, which "
                   "is what the compiler's 033B upload expects. Rows whose code "
                   "begins with an underscore are extract metadata for the "
-                  "audit trail, not indicators — leave them in the file."),
+                  "audit trail, not indicators - leave them in the file."),
             generated=date.today().isoformat(),
             server=server, database=DATABASE,
             output=output_name(report_type, period), script=name,

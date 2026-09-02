@@ -2,7 +2,7 @@
 
 Every string asserted below was observed in ClinicMasterMOH at Jinja on
 2 September 2026, with its real frequency in the comment. This is not a
-hypothetical vocabulary — it is the one the compiler will meet.
+hypothetical vocabulary - it is the one the compiler will meet.
 
 Two orderings must hold and they pull against each other:
 

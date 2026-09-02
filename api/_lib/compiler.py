@@ -1,4 +1,4 @@
-"""Report compilation — aggregates validated rows into DHIS2 data values.
+"""Report compilation - aggregates validated rows into DHIS2 data values.
 
 OPD (HMIS 105:01):
   - OA01 New attendance / OA02 Re-attendance by OPD age band and sex
@@ -118,8 +118,8 @@ def compile_opd(rows: list, period: str):
 def compile_opd_strata(rows: list, period: str):
     """Compile OPD from anonymous strata supplied by the on-premise agent.
 
-    Identical arithmetic to compile_opd — the same code index, the same
-    category option combos, the same unmapped-code reporting — but the age band
+    Identical arithmetic to compile_opd - the same code index, the same
+    category option combos, the same unmapped-code reporting - but the age band
     arrives already computed and each row carries a weight instead of standing
     for a single visit. That keeps a 40,000-visit month to a few hundred rows
     while producing figures indistinguishable from the upload path.
@@ -205,7 +205,7 @@ def compile_ipd(rows: list, period: str):
         if adm and dis and dis.year == year and dis.month == month and ward_coc:
             patient_days[ward_coc] += max((dis - adm).days, 1)
 
-        # Section 6 — admissions and deaths by diagnosis, age band and sex
+        # Section 6 - admissions and deaths by diagnosis, age band and sex
         if r.get("in_period"):
             code = r["diagnosis_code"]
             pair = ipd_diagnosis_index().get(code, {})

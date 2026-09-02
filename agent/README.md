@@ -23,7 +23,7 @@ Three things follow, and they are the point:
 
 - **No inbound firewall rule.** The agent only makes outbound HTTPS calls.
 - **No database credential reaches Vercel.** They live only on this machine.
-- **No patient-level data leaves the hospital.** The agent posts *strata* — counts by diagnosis, age band, sex and visit type. Never rows. The server rejects any payload carrying a patient identifier, so a mistake here fails loudly rather than quietly leaking.
+- **No patient-level data leaves the hospital.** The agent posts *strata* - counts by diagnosis, age band, sex and visit type. Never rows. The server rejects any payload carrying a patient identifier, so a mistake here fails loudly rather than quietly leaking.
 
 The server also never sends SQL. A job says only "105:01 for June 2026"; the queries live in `queries.py` in this repository. A compromised or spoofed server cannot make this agent run arbitrary statements against a database of HIV and TB records.
 
@@ -62,7 +62,7 @@ Generate a key with `python -c "import secrets; print(secrets.token_urlsafe(32))
 ## Running
 
 ```bash
-python jrrh_agent.py            # poll continuously — the normal mode
+python jrrh_agent.py            # poll continuously - the normal mode
 python jrrh_agent.py --once     # run any waiting job, then stop
 python jrrh_agent.py --schema   # print ClinicMaster columns and exit
 python jrrh_agent.py --check    # test connections and exit
@@ -70,11 +70,11 @@ python jrrh_agent.py --check    # test connections and exit
 
 While it is polling, the compiler shows **agent online** beside the *Pull from ClinicMaster* option. A Data Officer picks a report and period, clicks the button, and the agent picks the job up within `POLL_SECONDS`.
 
-To keep it running unattended use whatever the host machine offers — a Windows scheduled task at logon, a `launchd` job on macOS, or `systemd` on Linux.
+To keep it running unattended use whatever the host machine offers - a Windows scheduled task at logon, a `launchd` job on macOS, or `systemd` on Linux.
 
 ## One thing still to finish
 
-`DIAGNOSIS_SOURCE` in `queries.py` has `confirmed: False`. The `Diagnosis` and `Diseases` column names were never established, so until they are the agent extracts **attendance only** — OPD new and re-attendance by age band and sex — and says so in the job notes rather than guessing at column names and producing a report with no conditions in it.
+`DIAGNOSIS_SOURCE` in `queries.py` has `confirmed: False`. The `Diagnosis` and `Diseases` column names were never established, so until they are the agent extracts **attendance only** - OPD new and re-attendance by age band and sex - and says so in the job notes rather than guessing at column names and producing a report with no conditions in it.
 
 To finish it:
 
@@ -86,6 +86,6 @@ Match the printed columns against `DIAGNOSIS_SOURCE`, correct the four names, se
 
 ## Checking the figures
 
-The agent path and the upload path must produce identical numbers, or the result depends on how the data arrived — which is indefensible to the Ministry. `scripts/test_agent.py` asserts this directly: it compiles fifty visits both ways and requires every data value to match.
+The agent path and the upload path must produce identical numbers, or the result depends on how the data arrived - which is indefensible to the Ministry. `scripts/test_agent.py` asserts this directly: it compiles fifty visits both ways and requires every data value to match.
 
 For real reassurance, take a month you have already compiled from a CSV, pull the same month through the agent, and compare the two reports in the Reports tab. They should agree exactly.

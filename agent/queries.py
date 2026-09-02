@@ -1,7 +1,7 @@
 """Versioned, reviewed queries against ClinicMaster.
 
 These live with the agent, not on the server. A job from the compiler says only
-"105:01 for June 2026" — it never carries SQL. That way a compromised or
+"105:01 for June 2026" - it never carries SQL. That way a compromised or
 spoofed server cannot make an agent sitting inside the hospital run arbitrary
 statements against a database of HIV and TB records.
 
@@ -39,7 +39,7 @@ ORDER BY t.name;
 """
 
 # ---------------------------------------------------------------------------
-# DIAGNOSIS SOURCE — the one part still to confirm
+# DIAGNOSIS SOURCE - the one part still to confirm
 # ---------------------------------------------------------------------------
 # Set CONFIRMED to True once the names below match what --schema reports. Until
 # then the agent extracts attendance only and says so, rather than guessing at
@@ -55,7 +55,7 @@ DIAGNOSIS_SOURCE = {
 }
 
 # ---------------------------------------------------------------------------
-# 105:01 OPD — attendance strata
+# 105:01 OPD - attendance strata
 # ---------------------------------------------------------------------------
 # Counts by age in whole years, sex and visit category. The agent turns age into
 # the HMIS band; doing it here in SQL would duplicate the banding rules in two

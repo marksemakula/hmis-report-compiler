@@ -3,7 +3,7 @@
 Two things must hold or the connector is worse than useless:
 
   1. The agent's age banding must be identical to the server's. They are
-     implemented separately — the agent cannot import the server package — so
+     implemented separately - the agent cannot import the server package - so
      drift is possible and would silently misreport children.
   2. Compiling from agent strata must produce exactly what compiling the same
      visits from an upload produces. If the two paths disagree, the figures

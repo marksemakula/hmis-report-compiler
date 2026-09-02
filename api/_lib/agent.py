@@ -1,4 +1,4 @@
-"""On-premise extraction agent — job queue and result ingestion.
+"""On-premise extraction agent - job queue and result ingestion.
 
 ClinicMaster sits at 172.20.0.230, a private address on the hospital LAN. A
 Vercel function cannot route to it, so the compiler does not reach into the
@@ -16,8 +16,8 @@ tunnel:
 
   * No inbound firewall rule. The agent only makes outbound HTTPS calls.
   * No database credential ever reaches Vercel.
-  * No patient-level data leaves the hospital. The agent posts *strata* —
-    counts by diagnosis, age band, sex and visit type — never rows. A stratum
+  * No patient-level data leaves the hospital. The agent posts *strata* -
+    counts by diagnosis, age band, sex and visit type - never rows. A stratum
     with a count of one still names no one, and the ingestion below rejects
     any payload carrying a field that could identify a patient.
 
@@ -41,7 +41,7 @@ def _http_error(status: int, detail: str):
     error carrying the same status when not.
 
     The import is deferred so that validation and aggregation in this module can
-    be exercised by scripts/test_agent.py on a machine with nothing installed —
+    be exercised by scripts/test_agent.py on a machine with nothing installed -
     which is the whole point of those checks being runnable before a push."""
     try:
         from fastapi import HTTPException
@@ -150,7 +150,7 @@ def _clean_int(value, field):
 def validate_strata(payload) -> list:
     """Accept only anonymous aggregate strata. Returns the cleaned list.
 
-    Raises ValueError with a message the agent's author can act on — these are
+    Raises ValueError with a message the agent's author can act on - these are
     developer errors, not user errors, and vagueness helps nobody."""
     if not isinstance(payload, list):
         raise ValueError("strata must be a list")

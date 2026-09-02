@@ -11,8 +11,8 @@
  *                                   be a valid integer", type: "int_parsing" } ] }
  *
  * A 422 on a GET almost always means the URL matched a different route than
- * intended — typically a literal path swallowed by an earlier parameterised one
- * — so that case is called out by name rather than left as a validation message
+ * intended - typically a literal path swallowed by an earlier parameterised one
+ * - so that case is called out by name rather than left as a validation message
  * about a parameter the caller never knowingly supplied.
  */
 export function describeError(status, body, fallback = 'Request failed') {
@@ -29,8 +29,8 @@ export function describeError(status, body, fallback = 'Request failed') {
     const parts = detail
       .map((d) => {
         if (typeof d === 'string') return d;
-        // loc starts with the location kind — body, query, path, header,
-        // cookie — which tells the reader nothing they need. Keep the field.
+        // loc starts with the location kind - body, query, path, header,
+        // cookie - which tells the reader nothing they need. Keep the field.
         const KINDS = new Set(['body', 'query', 'path', 'header', 'cookie']);
         const where = Array.isArray(d?.loc) ? d.loc.filter((s) => !KINDS.has(s)).join('.') : '';
         const msg = d?.msg || d?.type || 'invalid value';
@@ -40,7 +40,7 @@ export function describeError(status, body, fallback = 'Request failed') {
     const joined = parts.join('; ');
     if (status === 422) {
       return `The server rejected this request as malformed (422)`
-        + (joined ? ` — ${joined}.` : '.')
+        + (joined ? ` - ${joined}.` : '.')
         + ' This usually means the URL reached the wrong endpoint;'
         + ' a stale browser cache is the commonest cause.';
     }
@@ -105,7 +105,7 @@ export function weeksInYear(y) {
  * The Monday opening ISO week `week` of `year`.
  *
  * ISO-8601 anchors week 1 on the week containing 4 January, so a year's first
- * week can begin in the previous December — week 1 of 2026 starts on
+ * week can begin in the previous December - week 1 of 2026 starts on
  * 29 December 2025. A picker that hid that would mislabel every week in January.
  */
 export function isoWeekMonday(year, week) {

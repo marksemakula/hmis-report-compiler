@@ -1,17 +1,17 @@
 /* ==================================================================
-   LAB HIE / CPHL ALIS — PAYLOAD DISCOVERY
+   LAB HIE / CPHL ALIS - PAYLOAD DISCOVERY
    ------------------------------------------------------------------
    Server   : 172.20.0.230        Database: ClinicMasterMOH
 
    WHY THIS EXISTS
    The published ALIS guide is a user manual: no endpoints, no payload
    structure, session login only. But ClinicMaster is ALREADY exchanging
-   messages with the lab HIE — the INT-prefixed tables hold 331,986
-   integration responses — and INTLabRequestDetails.JsonMessage contains
+   messages with the lab HIE - the INT-prefixed tables hold 331,986
+   integration responses - and INTLabRequestDetails.JsonMessage contains
    the actual JSON that crosses the wire. The specification we need is
    therefore already in the database, written by the integration itself.
 
-   SAFETY — READ THIS BEFORE RUNNING
+   SAFETY - READ THIS BEFORE RUNNING
    Those JSON messages contain PATIENT DATA: names, numbers, dates of
    birth. This script therefore returns the KEY NAMES ONLY, never the
    values. It reads the structure and discards the content, so what

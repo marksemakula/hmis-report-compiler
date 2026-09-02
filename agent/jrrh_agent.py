@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""JRRH extraction agent — runs inside the hospital network.
+"""JRRH extraction agent - runs inside the hospital network.
 
 ClinicMaster is at a private address the cloud application cannot reach. This
 agent bridges that gap in the safe direction: it makes outbound HTTPS calls
@@ -252,7 +252,7 @@ def run_job(job):
     if not extractor:
         api(f"/api/py/agent/jobs/{job['id']}/result",
             {"error": f"This agent has no extractor for {rt}."})
-        print(f"  no extractor for {rt} — reported back")
+        print(f"  no extractor for {rt} - reported back")
         return
 
     conn, driver = connect()
@@ -272,7 +272,7 @@ def run_job(job):
 
     result = api(f"/api/py/agent/jobs/{job['id']}/result",
                  {"strata": strata, "notes": notes, "driver": driver})
-    print(f"  posted — import {result.get('import_id')}")
+    print(f"  posted - import {result.get('import_id')}")
 
 
 def poll_once():
@@ -318,7 +318,7 @@ def main():
         return
 
     interval = int(cfg("POLL_SECONDS", "20"))
-    print(f"jrrh-agent {VERSION} — polling {cfg('COMPILER_URL')} every {interval}s")
+    print(f"jrrh-agent {VERSION} - polling {cfg('COMPILER_URL')} every {interval}s")
     heartbeat("started")
     if args.once:
         if not poll_once():

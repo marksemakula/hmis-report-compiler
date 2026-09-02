@@ -3,7 +3,7 @@
 FastAPI matches routes in declaration order. A literal path declared *after* a
 parameterised sibling with the same shape is unreachable: the parameterised
 route wins, and if its parameter is typed the request dies with 422 rather than
-404 — which reads like a validation bug rather than a routing one, and costs an
+404 - which reads like a validation bug rather than a routing one, and costs an
 afternoon to find.
 
 This is exactly what happened to /api/py/reports/types, shadowed by the earlier

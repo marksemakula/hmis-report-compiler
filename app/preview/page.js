@@ -80,7 +80,7 @@ export default function Preview() {
       <h1>Report Preview</h1>
       <p style={{ color: 'var(--muted)', marginTop: -6 }}>
         The official eHMIS form for each report, exactly as it appears on the national instance,
-        with any compiled figures in place. Read-only — available to every signed-in user, and
+        with any compiled figures in place. Read-only - available to every signed-in user, and
         available before anything is submitted to DHIS2.
       </p>
 
@@ -136,20 +136,20 @@ export default function Preview() {
 
           {status && (
             <div className={`alert ${status.report ? 'success' : 'info'}`} style={{ marginTop: 14 }}>
-              <strong>{status.periodLabel}</strong>{' — '}
+              <strong>{status.periodLabel}</strong>{' - '}
               {status.report
                 ? `report #${status.report.id}, ${status.report.values} data values, compiled by ${status.report.generated_by || 'unknown'}`
                   + (status.report.push_status && status.report.push_status !== 'PENDING'
                       ? `, submission status ${status.report.push_status}.`
                       : ', not yet submitted.')
-                : 'no report compiled for this period — the blank form is shown below.'}
+                : 'no report compiled for this period - the blank form is shown below.'}
             </div>
           )}
 
           <div style={{ marginTop: 14, border: '1px solid var(--line)', borderRadius: 8, overflow: 'hidden' }}>
             <iframe
               key={`${current.type}-${period}`}
-              title={`${current.label} — ${period}`}
+              title={`${current.label} - ${period}`}
               src={`/api/py/preview/${current.type}?period=${encodeURIComponent(period)}`}
               sandbox=""
               style={{ width: '100%', height: '72vh', border: 0, background: '#fff' }}

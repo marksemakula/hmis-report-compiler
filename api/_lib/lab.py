@@ -1,16 +1,16 @@
-"""Laboratory results — from ClinicMaster's vocabulary to a reportable answer.
+"""Laboratory results - from ClinicMaster's vocabulary to a reportable answer.
 
 WHERE THE VALUE LIVES
 
 Not where you would expect. `LabResults` is a container: 2,337 of its 28,252
 rows carry a non-blank `Result`. The answer is one level down in
-`LabResultsEXT`, where 243,270 of 250,936 rows do — one row per analyte, keyed
+`LabResultsEXT`, where 243,270 of 250,936 rows do - one row per analyte, keyed
 by `SubTestCode`. `LabResultsEXT` has no name for that code; the names are in
 `LabTestsEXT`, and the mapping below carries the ones that matter so no join is
 needed at compile time.
 
 A test can have several analytes and only one of them answers the question.
-HIV serology has four — Determine, STATPAK, SD BIOLINE and FINAL RESULTS — and
+HIV serology has four - Determine, STATPAK, SD BIOLINE and FINAL RESULTS - and
 malaria microscopy has Detection, Species, Stage and Parasite Density. Reading
 the wrong one silently reports the wrong thing, so each test names its own.
 
@@ -26,7 +26,7 @@ Observed at Jinja on 2 September 2026, for the same clinical concept:
 
 `POSTIVE` is not a typing slip in the data. It is the spelling stored in
 `LabPossibleResults`, the controlled list the laboratory picks from, for HIV
-serology, HBsAg, TPHA, HCG-BETA and malaria RDT — so every result recorded
+serology, HBsAg, TPHA, HCG-BETA and malaria RDT - so every result recorded
 through the dropdown carries it. Blood grouping is worse: `Negaitve` and
 `Positve`. Both spellings must therefore be accepted, and the reference table
 should be corrected in ClinicMaster rather than worked around forever.
@@ -51,7 +51,7 @@ LAB_TESTS = {
     "407727009": {"name": "Malaria RDT", "subtest": "407727009",
                   "subtest_name": "MRDT", "concept": "MALARIA_RDT"},
     # Determine is the screening assay and carries 212 of the 222 results.
-    # FINAL RESULTS — the testing algorithm's conclusion — is filled 8 times.
+    # FINAL RESULTS - the testing algorithm's conclusion - is filled 8 times.
     # Screening is therefore what can actually be reported, and the gap is a
     # data-quality finding rather than something to paper over.
     "165813002": {"name": "HIV serology", "subtest": "kizxvo8k",
@@ -117,7 +117,7 @@ def classify(raw: str):
     Only the leading clause is read. An Xpert result reads
     'MTB DETECTED MEDIUM,RIF resistance NOT DETECTED': the first clause is the
     answer to 'was TB found', and the second answers a different question
-    entirely — see rifampicin_resistant below."""
+    entirely - see rifampicin_resistant below."""
     if raw is None:
         return None
     lead = _normalise(str(raw).split(",")[0])
@@ -151,7 +151,7 @@ def rifampicin_resistant(raw: str):
     or None when the result does not speak to resistance.
 
     'MTB DETECTED MEDIUM,RIF resistance NOT DETECTED' is a TB case that is NOT
-    resistant — reading the whole string with classify() would be wrong in both
+    resistant - reading the whole string with classify() would be wrong in both
     directions, which is why resistance has its own reader."""
     if raw is None:
         return None
@@ -199,8 +199,8 @@ def is_numeric_test(test_code: str) -> bool:
 def numeric_value(raw: str):
     """A measurement, for CD4 and viral load. Returns a float, or None.
 
-    A threshold result — '< 200', the form CD4 is reported in when below the
-    limit of quantification — returns the threshold itself; a caller that cares
+    A threshold result - '< 200', the form CD4 is reported in when below the
+    limit of quantification - returns the threshold itself; a caller that cares
     about the distinction should read the raw string."""
     if raw is None:
         return None
@@ -211,7 +211,7 @@ def numeric_value(raw: str):
 def summarise(rows: list) -> dict:
     """Count classified results by concept and verdict.
 
-    `rows` are dicts with test_code, subtest_code and result — the shape a
+    `rows` are dicts with test_code, subtest_code and result - the shape a
     read of LabResultsEXT produces. Rows for an analyte that is not the
     reportable one are skipped, so a full blood count's twenty-four analytes
     contribute nothing and a malaria smear contributes once."""

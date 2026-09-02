@@ -1,11 +1,11 @@
 /* ==================================================================
-   LAB — RESULT VOCABULARY AND THE ROUTE BACK TO A VISIT   (v2)
+   LAB - RESULT VOCABULARY AND THE ROUTE BACK TO A VISIT   (v2)
    ------------------------------------------------------------------
    Server   : 172.20.0.230        Database: ClinicMasterMOH
 
    WHY THIS IS VERSION TWO
    Version one referenced LabResultsEXT.SubTestName, which does not
-   exist — I assumed the clinical table mirrored the INT staging table,
+   exist - I assumed the clinical table mirrored the INT staging table,
    and it does not. The whole script then failed, including the six
    sections that were correct, because an invalid column name is a
    COMPILE-time binding error: SQL Server binds the entire batch before
@@ -22,12 +22,12 @@
 
    WHAT SCRIPT 11 SETTLED
    The join works: LabRequests carries SpecimenNo and VisitNo, and 28,191
-   of 28,214 results reconcile to it — 99.9 per cent.
+   of 28,214 results reconcile to it - 99.9 per cent.
 
    And the result value is not on the parent row. LabResults.Result is
    blank for every reportable test: 3,724 empty malaria smears, 222 empty
    HIV serologies. The value lives one level down, in LabResultsEXT. The
-   give-away was in script 11's own output — sub-test '01 Detection'
+   give-away was in script 11's own output - sub-test '01 Detection'
    appears exactly 3,724 times, matching the blank malaria parents one
    for one.
 

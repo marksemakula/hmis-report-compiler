@@ -1,5 +1,5 @@
 /* ==================================================================
-   LAB RESULTS — WHAT IS ALREADY ON SITE
+   LAB RESULTS - WHAT IS ALREADY ON SITE
    ------------------------------------------------------------------
    Server   : 172.20.0.230        Database: ClinicMasterMOH
 
@@ -7,7 +7,7 @@
    Script 10 settled the question we thought we were asking. ALIS speaks
    HL7 FHIR: ClinicMaster posts a Bundle of type "transaction" and gets
    back a Bundle of type "transaction-response". It has done so 104,137
-   times, and 28,211 results have already come back and been stored —
+   times, and 28,211 results have already come back and been stored -
    locally, in INTLabResults, with 250,667 analyte-level rows beside them
    in INTLabResultsEXT.
 
@@ -17,7 +17,7 @@
 
      a) which tests exist and in what volume, so the 105:04-05 and lab
         sections can be mapped to real test codes rather than guesses;
-     b) what a result actually looks like — "Positive", "POS", "1", "R" —
+     b) what a result actually looks like - "Positive", "POS", "1", "R" -
         because a tally of positives cannot be written against a
         vocabulary we have not seen;
      c) how a specimen joins back to a visit, without which no lab figure
@@ -185,7 +185,7 @@ SELECT '6_result_flags', CAST(LEFT(ISNULL(ResultFlagID, '(null)'), 380) AS varch
 FROM   ClinicMasterMOH.dbo.INTLabResults
 GROUP BY ResultFlagID;
 
-/* ---- 7. Integration configuration — COLUMN NAMES ONLY --------------
+/* ---- 7. Integration configuration - COLUMN NAMES ONLY --------------
    INTAgents holds seven rows describing the configured integrations. It
    very likely contains the ALIS endpoint and a credential. The credential
    is not needed here and must not be pasted anywhere, so this reads the

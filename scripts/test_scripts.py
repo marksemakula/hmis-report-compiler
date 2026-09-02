@@ -184,8 +184,8 @@ print("All checks passed.")
 #
 # 033B is a tally, not a register: its script returns two columns and needs no
 # age banding. The codes it emits were checked against the live national
-# instance on 3 September 2026 — all twelve resolve, and all 239 of the data
-# set's elements parse — so an upload compiled from this script cannot come
+# instance on 3 September 2026 - all twelve resolve, and all 239 of the data
+# set's elements parse - so an upload compiled from this script cannot come
 # back with an unmapped code.
 # ---------------------------------------------------------------------------
 print("\n033B weekly surveillance script")

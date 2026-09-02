@@ -7,7 +7,7 @@ Both halves matter and for different reasons.
 
   * Print a zero in a column another team fills from a paper register and the
     form asserts, in our name, that their work found nothing.
-  * Send a zero to DHIS2 and it is dropped in silence — measured against the
+  * Send a zero to DHIS2 and it is dropped in silence - measured against the
     live instance, an import of "1" reports imported=1 and the same element
     with "0" reports imported=0, ignored=0, no conflict. An app that counted
     those as written would report six thousand values submitted where the
@@ -127,8 +127,8 @@ check("nothing the compiler produced is flagged",
 real = [v for v in shown if not v.get("imputed")]
 check("stripping imputed values returns exactly the compiled set", real, compiled)
 
-# The payload builder is the last gate. Hand it the *displayed* values — the
-# mistake a future caller is most likely to make — and it must still send only
+# The payload builder is the last gate. Hand it the *displayed* values - the
+# mistake a future caller is most likely to make - and it must still send only
 # what was measured.
 from _lib import dhis2  # noqa: E402
 # The attribute option combo is resolved from the live instance. Stubbed here

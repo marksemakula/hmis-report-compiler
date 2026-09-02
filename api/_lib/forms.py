@@ -16,7 +16,7 @@ own devising. Two things follow from that, and both matter:
   * When the Ministry revises a form, the preview follows on the next metadata
     refresh. Nothing here transcribes 2,752 data elements by hand.
 
-The forms are large — 105:01 is over half a megabyte — so the sanitised
+The forms are large - 105:01 is over half a megabyte - so the sanitised
 skeleton is cached in Postgres and only the value injection runs per request.
 
 SAFETY: the HTML is third-party. Scripts, event handlers and javascript: URLs
@@ -31,7 +31,7 @@ import requests
 
 from .metadata import CONSTANTS, mapping
 
-# id="<11-char UID>-<11-char UID>-val" — the DHIS2 data entry convention.
+# id="<11-char UID>-<11-char UID>-val" - the DHIS2 data entry convention.
 FIELD_ID_RE = re.compile(r'id\s*=\s*"([A-Za-z0-9]{11})-([A-Za-z0-9]{11})-val"', re.I)
 
 _SCRIPT_RE   = re.compile(r"<script\b[^>]*>.*?</script\s*>", re.I | re.S)
@@ -195,7 +195,7 @@ def imputed_keys(compiled_values: list) -> set:
 
     A measured zero and an imputed zero print the same character, so the
     difference has to be carried separately or the page cannot tell the reader
-    which is which — and on a surveillance return that difference is the whole
+    which is which - and on a surveillance return that difference is the whole
     point."""
     return {
         f"{v['dataElement']}-{v['categoryOptionCombo']}"
@@ -275,7 +275,7 @@ def render_document(report_type: str, period: str, period_label: str,
         else:
             state += ' <span class="flag">· not yet submitted</span>'
     else:
-        state = '<span class="flag">Blank form — no report compiled for this period</span>'
+        state = '<span class="flag">Blank form - no report compiled for this period</span>'
 
     cov = meta.get("coverage") or {}
     if cov.get("notOurs"):
@@ -283,7 +283,7 @@ def render_document(report_type: str, period: str, period_label: str,
             '<div class="legend">'
             '<span><i class="k1">42</i>counted from the register</span>'
             '<span><i class="k2">0</i>no cases recorded this period</span>'
-            '<span><i class="k3">&nbsp;</i>not compiled here — entered from '
+            '<span><i class="k3">&nbsp;</i>not compiled here - entered from '
             f'another register</span><span>{cov["notOurs"]} of {cov["cells"]} cells '
             'on this form are filled by other staff, so they are left blank rather '
             'than zeroed.</span></div>'
@@ -298,7 +298,7 @@ def render_document(report_type: str, period: str, period_label: str,
         f"<style>{PAGE_CSS}</style></head><body>"
         f"<div class='hdr'><h1>{html_lib.escape(ds.get('name', report_type))}</h1>"
         f"<div class='sub'>{html_lib.escape(mapping()['orgUnit']['name'])}</div></div>"
-        f"<div class='bar'><span>Period <b>{html_lib.escape(period)}</b> — "
+        f"<div class='bar'><span>Period <b>{html_lib.escape(period)}</b> - "
         f"{html_lib.escape(period_label)}</span>{state}</div>"
         f"{legend}"
         f"<div class='wrap'>{body}</div></body></html>"

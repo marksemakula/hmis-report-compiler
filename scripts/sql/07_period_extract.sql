@@ -1,5 +1,5 @@
 /* ==================================================================
-   HMIS REPORT COMPILER — PERIOD EXTRACT (WEEKLY OR MONTHLY)
+   HMIS REPORT COMPILER - PERIOD EXTRACT (WEEKLY OR MONTHLY)
    ------------------------------------------------------------------
    Server   : 172.20.0.230
    Database : ClinicMasterMOH
@@ -78,14 +78,14 @@ CREATE TABLE #tally (Code varchar(20) NOT NULL PRIMARY KEY, Value int NOT NULL);
 
 
 /* ==================================================================
-   SECTION A — OPD attendance and deaths  (033B codes AP01-AP03)
+   SECTION A - OPD attendance and deaths  (033B codes AP01-AP03)
    ------------------------------------------------------------------
    AP02 is every visit in the period. AP01 is new attendances.
 
    CORRECTED 2 September 2026. AP01 previously excluded visits whose
    VisitCategoryID was 'Follow up', 'RTT - Return To Treatment',
-   'Represented' or 'CDDP'. That column holds CODES, not names —
-   10C, 10CDDP, 10O, 10R, 10RP, 10RTT, 10S — so the exclusion matched
+   'Represented' or 'CDDP'. That column holds CODES, not names -
+   10C, 10CDDP, 10O, 10R, 10RP, 10RTT, 10S - so the exclusion matched
    nothing and AP01 came back identical to AP02. Week 35 of 2026
    reported 3,619 for both.
 
@@ -162,7 +162,7 @@ WHERE  r.DrawnDateTime >= @Start AND r.DrawnDateTime < @EndX;
 
 
 /* ==================================================================
-   SECTION B — Malaria testing and treatment  (MA02-MA05)
+   SECTION B - Malaria testing and treatment  (MA02-MA05)
    ------------------------------------------------------------------
    Counts of tests requested and of positive results, by the date the
    specimen was drawn. MA01 (suspected malaria) and MA06-MA10 (treated
@@ -175,12 +175,12 @@ WHERE  r.DrawnDateTime >= @Start AND r.DrawnDateTime < @EndX;
    separate analytes of the same smear and must not be counted again.
    ================================================================== */
 
-/* MA02 — "Cases Tested with RDT", in the Ministry's own words on the
+/* MA02 - "Cases Tested with RDT", in the Ministry's own words on the
    033B form. TESTED, not requested.
 
    CORRECTED 3 September 2026. This counted rows in LabRequestDetails,
    which is the order, not the test. Week 35 showed why that matters:
-   173 RDTs were ordered and not one result was ever recorded — the
+   173 RDTs were ordered and not one result was ever recorded - the
    diagnostic returned zero rows in LabResultsEXT, not zero positives.
    Reporting "173 tested, 0 positive" would have told the Ministry that
    Jinja found no positive rapid test all week. Reporting "0 tested,
@@ -208,7 +208,7 @@ FROM   #res
 WHERE  TestCode = @MalariaRDT AND SubTestCode = @MalariaRDT
   AND  Verdict = 'Positive';
 
-/* MA04 — "Cases Tested with Microscopy". Same correction: 199 smears
+/* MA04 - "Cases Tested with Microscopy". Same correction: 199 smears
    were ordered in week 35 and 88 carry a readable Detection result.
    Counting the 199 understated positivity from 20 per cent to 9. */
 INSERT INTO #tally (Code, Value)
@@ -225,7 +225,7 @@ WHERE  d.TestCode = @MalariaMicro
   AND  r.DrawnDateTime >= @Start AND r.DrawnDateTime < @EndX;
 
 /* Microscopy positives read the Detection analyte only. A graded smear
-   — MPS +, ++ or +++ SEEN — is a positive; NO MPS SEEN and
+   - MPS +, ++ or +++ SEEN - is a positive; NO MPS SEEN and
    'No Plasmodium Parasites' are not. The previous version counted a
    smear as positive whenever the parent Result was merely non-NULL,
    which a blank string satisfies. */
@@ -237,14 +237,14 @@ WHERE  TestCode = @MalariaMicro AND SubTestCode = '01'
 
 
 /* ==================================================================
-   SECTION C — GeneXpert  (GP01-GP05)
+   SECTION C - GeneXpert  (GP01-GP05)
    ------------------------------------------------------------------
    GP06 (modules working) and GP07 (cartridges remaining) are physical
    observations of the machine and its store. No register holds them;
    they are keyed in.
    ================================================================== */
 
-/* GP01 — "No. of samples tested". Week 35 ordered 21 and resulted 6,
+/* GP01 - "No. of samples tested". Week 35 ordered 21 and resulted 6,
    so GP03's single MTB detection is one of six, not one of twenty-one. */
 INSERT INTO #tally (Code, Value)
 SELECT 'GP01', COUNT(*)
@@ -259,14 +259,14 @@ JOIN   ClinicMasterMOH.dbo.LabRequests r ON r.SpecimenNo = d.SpecimenNo
 WHERE  d.TestCode IN (@GeneXpert, @MTBXDR)
   AND  r.DrawnDateTime >= @Start AND r.DrawnDateTime < @EndX;
 
-/* GP02 — specimens rejected.
+/* GP02 - specimens rejected.
 
    This once counted rows where RejectedID was non-blank and returned
    21 against GP01's 21, reporting every GeneXpert specimen as
    rejected. The diagnostic added on 2 September settled why: across
    all 2,319 lab request details in week 35 the column held exactly one
-   value, '54N'. It is a coded column like the rest of this schema —
-   GenderID is 15F/15M, VisitStatusID is 9CO/9DR/9IP — and 54N is the
+   value, '54N'. It is a coded column like the rest of this schema -
+   GenderID is 15F/15M, VisitStatusID is 9CO/9DR/9IP - and 54N is the
    "not rejected" code, never an empty string.
 
    Rejected is therefore anything that is not 54N. An unfamiliar code
@@ -291,7 +291,7 @@ JOIN   ClinicMasterMOH.dbo.LabRequests r ON r.SpecimenNo = d.SpecimenNo
 WHERE  r.DrawnDateTime >= @Start AND r.DrawnDateTime < @EndX
 GROUP BY LEFT('_rejectedid_' + ISNULL(NULLIF(LTRIM(RTRIM(d.RejectedID)), ''), 'blank'), 20);
 
-/* GP03 — TB detected. Reads the MTB analyte, and reads only the clause
+/* GP03 - TB detected. Reads the MTB analyte, and reads only the clause
    before the first comma, because a positive Xpert result reads
    'MTB DETECTED MEDIUM,RIF resistance NOT DETECTED' and the previous
    NOT LIKE '%NOT DETECT%' threw exactly those away. */
@@ -303,7 +303,7 @@ WHERE  TestCode IN (@GeneXpert, @MTBXDR)
   AND  Verdict = 'Positive';
 
 INSERT INTO #tally (Code, Value)
-/* GP04 — rifampicin resistance. This one already read the right table,
+/* GP04 - rifampicin resistance. This one already read the right table,
    and its RIF Resistance analyte carries a standalone value with no
    second clause, so the leading-clause rule changes nothing here. It
    goes through #res for consistency, and so that a future change to
@@ -323,7 +323,7 @@ WHERE  TestCode IN (@GeneXpert, @MTBXDR)
 
 
 /* ==================================================================
-   SECTION D — Notifiable disease case and death counts
+   SECTION D - Notifiable disease case and death counts
    ------------------------------------------------------------------
    PENDING. Requires the Diagnosis and Diseases column names from
    06_extract_schema_discovery.sql. Once known, populate #map below with
@@ -355,7 +355,7 @@ WHERE  TestCode IN (@GeneXpert, @MTBXDR)
 
 
 /* ==================================================================
-   OUTPUT — the compiler's import format
+   OUTPUT - the compiler's import format
    ------------------------------------------------------------------
    Two columns exactly: Code, Value. Export as CSV and upload.
    Indicators absent from this result are simply not derivable from
@@ -368,7 +368,7 @@ WHERE  TestCode IN (@GeneXpert, @MTBXDR)
    ordered and resulted visible every week rather than only when
    somebody goes looking:
 
-       week 35, 2026 — RDT 173 ordered, 0 resulted
+       week 35, 2026 - RDT 173 ordered, 0 resulted
                        smear 199 ordered, 88 resulted
                        Xpert 21 ordered, 6 resulted
 
@@ -378,8 +378,8 @@ WHERE  TestCode IN (@GeneXpert, @MTBXDR)
 
 
 /* Period actually covered, carried in the same grid as the tally.
-   It used to be a second SELECT, which meant Azure Data Studio — which
-   saves one grid per CSV — discarded it every time. Confirm these rows
+   It used to be a second SELECT, which meant Azure Data Studio - which
+   saves one grid per CSV - discarded it every time. Confirm these rows
    match the period selected in the compiler before uploading.
 
    The leading underscore sorts them above the codes and marks them as

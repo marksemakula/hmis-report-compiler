@@ -1,4 +1,4 @@
-"""Database layer — Neon Postgres via psycopg2. Tables are created on first use."""
+"""Database layer - Neon Postgres via psycopg2. Tables are created on first use."""
 import os
 import json
 import hashlib

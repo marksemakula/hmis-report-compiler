@@ -48,8 +48,8 @@ check('points at the likely cause', msg, has('stale browser cache'));
 
 console.log('\nOther shapes the API actually returns');
 check('plain HTTPException string',
-  describeError(401, { detail: 'Session expired — please sign in again' }, 'x'),
-  'Session expired — please sign in again');
+  describeError(401, { detail: 'Session expired - please sign in again' }, 'x'),
+  'Session expired - please sign in again');
 check('multiple validation problems are joined',
   describeError(422, { detail: [{ loc: ['body', 'a'], msg: 'required' }, { loc: ['body', 'b'], msg: 'too long' }] }, 'x'),
   (g) => g.includes('a: required') && g.includes('b: too long'));
@@ -98,7 +98,7 @@ for (const s of shapes) {
 check(`${shapes.length} body shapes x 5 statuses all yield readable text`, clean, true);
 
 console.log('\nWeek labels must agree with the server\'s ISO calendar');
-// The picker labels each week with the dates it covers — "Week 35
+// The picker labels each week with the dates it covers - "Week 35
 // (2026-08-24 - 2026-08-30)". Those dates are computed in the browser while
 // the extract's date filter is computed in Python, so the two arithmetics have
 // to agree exactly. A week mislabelled by one day would have someone extract a
