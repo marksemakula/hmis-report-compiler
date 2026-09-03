@@ -1,14 +1,20 @@
 import './globals.css';
-import { Inter } from 'next/font/google';
+import { Ubuntu } from 'next/font/google';
 import Nav from './nav';
 
-/* Tabler is set in Inter throughout. The font was Ubuntu; --font-ubuntu is
-   still defined in globals.css, aliased onto this stack, because a handful of
-   inline styles across the pages read it directly. */
-const inter = Inter({
+/* Ubuntu, which is what this application has always been set in. Tabler's own
+   stack is Inter; only the typeface differs, and globals.css reads
+   --font-ubuntu as the head of --tblr-font-sans-serif so nothing else has to
+   know which face is loaded.
+
+   Ubuntu ships 300/400/500/700 and has no 600, so the headings weight is
+   declared as 700 in globals.css rather than Tabler's 600 - CSS font matching
+   would resolve 600 to 700 anyway, and saying so is better than leaving a
+   weight that only renders correctly by accident. */
+const ubuntu = Ubuntu({
   subsets: ['latin'],
-  weight: ['400', '500', '600', '700'],
-  variable: '--font-inter',
+  weight: ['300', '400', '500', '700'],
+  variable: '--font-ubuntu',
   display: 'swap',
 });
 
@@ -23,7 +29,7 @@ export const metadata = {
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="en-GB" className={inter.variable}>
+    <html lang="en-GB" className={ubuntu.variable}>
       <body>
         <div className="shell">
           <Nav />

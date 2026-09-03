@@ -83,14 +83,24 @@
   --tblr-page-padding: 1rem;
   --tblr-page-padding-y: 1.5rem;
 
-  /* -- type --------------------------------------------------------------- */
-  --tblr-font-sans-serif: var(--font-inter), Inter, -apple-system,
+  /* -- type ---------------------------------------------------------------
+   *
+   * Ubuntu, loaded by next/font in layout.js, which is what defines
+   * --font-ubuntu. It is deliberately NOT redefined here: :root and the class
+   * next/font puts on <html> have equal specificity, so declaring it in both
+   * places would leave the winner decided by source order.
+   *
+   * Tabler sets headings at 600. Ubuntu has 300/400/500/700 and no 600, so the
+   * browser's font matching resolves 600 upwards to 700 regardless; 700 is
+   * declared here so the rendered weight is the one written down.
+   */
+  --tblr-font-sans-serif: var(--font-ubuntu), Ubuntu, -apple-system,
     BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
-  --tblr-font-monospace: Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  --tblr-font-monospace: 'Ubuntu Mono', Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
   --tblr-font-size-base: .875rem;
   --tblr-line-height-base: 1.4285714286;
   --tblr-font-weight-medium: 500;
-  --tblr-font-weight-bold: 600;
+  --tblr-font-weight-bold: 700;
 
   /* -- legacy aliases, still read by inline styles across the pages -------- */
   --navy:   #1f2937;
@@ -104,9 +114,6 @@
   --ok:     #2fb344;
   --warn:   #f59f00;
   --bad:    #d63939;
-  /* The font was Ubuntu; Tabler is set in Inter. Kept so the one inline
-     reference to it does not resolve to nothing. */
-  --font-ubuntu: var(--tblr-font-sans-serif);
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -121,7 +128,6 @@ body {
   line-height: var(--tblr-line-height-base);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  font-feature-settings: 'cv03', 'cv04', 'cv11';
 }
 
 h1, h2, h3, h4, h5, h6 {
@@ -165,8 +171,12 @@ code, pre { font-family: var(--tblr-font-monospace); font-size: .8125rem; }
   flex-direction: column;
 }
 
-/* Tabler's container steps up at two breakpoints rather than filling the
-   viewport: 1140px from 1200px wide, 1320px from 1400px. */
+/* Tabler's own container steps up at breakpoints and stops at 1320px. This
+   one is fluid instead: the page fills the viewport at any width, with the
+   side padding opening up a little on wider screens so content never runs to
+   the very edge of the glass. The 105:01 preview form and the compiled-value
+   tables are both far wider than 1320px, and were being scrolled sideways
+   inside a column while half the monitor sat empty. */
 .container-xl {
   width: 100%;
   margin: 0 auto;
@@ -178,8 +188,8 @@ main {
   margin: 0 auto;
   padding: var(--tblr-page-padding-y) var(--tblr-page-padding);
 }
-@media (min-width: 1200px) { .container-xl, main { max-width: 1140px; } }
-@media (min-width: 1400px) { .container-xl, main { max-width: 1320px; } }
+@media (min-width: 1200px) { .container-xl, main { padding-inline: 1.5rem; } }
+@media (min-width: 1800px) { .container-xl, main { padding-inline: 2rem; } }
 
 /* Tabler's page header: a small uppercase eyebrow over a bold title, with
    optional actions pushed to the right on wide screens. */

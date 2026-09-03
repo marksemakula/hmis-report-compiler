@@ -1,5 +1,5 @@
 'use client';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -68,6 +68,34 @@ function tipShift(percent) {
   return percent > 72 ? 'translateX(-100%)' : percent < 18 ? 'translateX(0)' : 'translateX(-50%)';
 }
 
+/**
+ * The rendered pixel width of an element, for use as an SVG's viewBox width.
+ *
+ * A fixed viewBox scaled to fit its container scales *everything* with it,
+ * type and stroke weights included. That was tolerable while the page was
+ * capped at 1320px; on a full-width layout the same chart stretches to twice
+ * the width and the axis labels arrive at 24px. Matching the viewBox to the
+ * measured width instead makes one user unit one CSS pixel, so an 11px label
+ * is 11px and a 24px bar is 24px on a laptop and on a wall display alike.
+ *
+ * The fallback matters: ResizeObserver has not fired on the first paint, and
+ * does not exist at all during the server render.
+ */
+function useWidth(ref, fallback = 760) {
+  const [width, setWidth] = useState(fallback);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver(([entry]) => {
+      const next = Math.round(entry.contentRect.width);
+      if (next > 0) setWidth(next);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [ref]);
+  return width;
+}
+
 const TIP_STYLE = {
   position: 'absolute', top: 0, pointerEvents: 'none',
   background: '#fff', border: '1px solid rgba(4,32,69,.1)', borderRadius: 6,
@@ -77,8 +105,10 @@ const TIP_STYLE = {
 
 function ActivityChart({ buckets }) {
   const [hover, setHover] = useState(null);
+  const box = useRef(null);
+  const W = useWidth(box);
 
-  const W = 760, H = 240;
+  const H = 240;
   const padL = 34, padR = 8, padT = 12, padB = 28;
   const plotW = W - padL - padR;
   const plotH = H - padT - padB;
@@ -96,8 +126,9 @@ function ActivityChart({ buckets }) {
   const active = hover === null ? null : buckets[hover];
 
   return (
-    <div style={{ position: 'relative' }}>
-      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }} role="img"
+    <div ref={box} style={{ position: 'relative' }}>
+      <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H}
+        style={{ width: '100%', height: `${H}px`, display: 'block' }} role="img"
         aria-label="Reports compiled each month, split by submission outcome">
         {ticks.map((v) => (
           <g key={v}>
@@ -170,7 +201,10 @@ function ActivityChart({ buckets }) {
  */
 function RateTrend({ points }) {
   const [hover, setHover] = useState(null);
-  const W = 760, H = 220;
+  const box = useRef(null);
+  const W = useWidth(box);
+
+  const H = 220;
   const padL = 38, padR = 44, padT = 14, padB = 28;
   const plotW = W - padL - padR;
   const plotH = H - padT - padB;
@@ -195,8 +229,9 @@ function RateTrend({ points }) {
   const active = hover === null ? null : points[hover];
 
   return (
-    <div style={{ position: 'relative' }}>
-      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }} role="img"
+    <div ref={box} style={{ position: 'relative' }}>
+      <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H}
+        style={{ width: '100%', height: `${H}px`, display: 'block' }} role="img"
         aria-label="Average reporting rate by month">
         {ticks.map((v) => (
           <g key={v}>
