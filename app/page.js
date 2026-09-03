@@ -7,6 +7,8 @@ import {
   IconArrowRight, IconEye, IconUpload,
 } from './icons';
 import DistrictMap from './districtmap';
+import MalariaChannel from './malariachannel';
+import useWidth from './usewidth';
 
 /* ---------------------------------------------------------------- periods */
 
@@ -38,63 +40,9 @@ const ordinal = (n) => {
   return n + (s[(v - 20) % 10] || s[v] || s[0]);
 };
 
-/* ------------------------------------------------------ compilation chart
- *
- * Reports compiled per month, split by what became of them. Three states, so
- * a legend is always drawn and the colours are never the only channel.
- *
- * The obvious palette - green for submitted, red for failed - is the one
- * thing this chart must not do: green #2fb344 against red #d63939 separates
- * by only 7.8 in deuteranopia, below the 8 floor, and "did it reach DHIS2"
- * is the whole question the chart answers. Tabler's primary blue against the
- * same red separates by 23.4, and against the neutral grey by 16.4. Green is
- * still used for *status*, where a word sits beside it; it is not used to
- * carry meaning on its own in a chart.
- */
-const SERIES = [
-  { key: 'PUSHED', label: 'Submitted', color: '#066fd1' },
-  { key: 'DRAFT',  label: 'Awaiting submission', color: '#9ca3af' },
-  { key: 'FAILED', label: 'Failed', color: '#d63939' },
-];
-
-/** Rounded at the data end, square at the baseline, per the mark spec. */
-function barPath(x, y, w, h, roundTop) {
-  const r = roundTop ? Math.min(4, w / 2, h) : 0;
-  if (!r) return `M${x},${y}h${w}v${h}h${-w}z`;
-  return `M${x},${y + r}a${r},${r} 0 0 1 ${r},${-r}h${w - 2 * r}a${r},${r} 0 0 1 ${r},${r}v${h - r}h${-w}z`;
-}
-
 /** Anchor a tooltip to a column, flipping it inboard near either edge. */
 function tipShift(percent) {
   return percent > 72 ? 'translateX(-100%)' : percent < 18 ? 'translateX(0)' : 'translateX(-50%)';
-}
-
-/**
- * The rendered pixel width of an element, for use as an SVG's viewBox width.
- *
- * A fixed viewBox scaled to fit its container scales *everything* with it,
- * type and stroke weights included. That was tolerable while the page was
- * capped at 1320px; on a full-width layout the same chart stretches to twice
- * the width and the axis labels arrive at 24px. Matching the viewBox to the
- * measured width instead makes one user unit one CSS pixel, so an 11px label
- * is 11px and a 24px bar is 24px on a laptop and on a wall display alike.
- *
- * The fallback matters: ResizeObserver has not fired on the first paint, and
- * does not exist at all during the server render.
- */
-function useWidth(ref, fallback = 760) {
-  const [width, setWidth] = useState(fallback);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el || typeof ResizeObserver === 'undefined') return undefined;
-    const ro = new ResizeObserver(([entry]) => {
-      const next = Math.round(entry.contentRect.width);
-      if (next > 0) setWidth(next);
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [ref]);
-  return width;
 }
 
 const TIP_STYLE = {
@@ -103,96 +51,6 @@ const TIP_STYLE = {
   boxShadow: '0 16px 24px 2px rgba(0,0,0,.07)', padding: '.5rem .625rem',
   fontSize: '.75rem', whiteSpace: 'nowrap', zIndex: 2,
 };
-
-function ActivityChart({ buckets }) {
-  const [hover, setHover] = useState(null);
-  const box = useRef(null);
-  const W = useWidth(box);
-
-  const H = 240;
-  const padL = 34, padR = 8, padT = 12, padB = 28;
-  const plotW = W - padL - padR;
-  const plotH = H - padT - padB;
-  const band = plotW / Math.max(buckets.length, 1);
-  const barW = Math.min(24, band - 12);
-
-  const peak = Math.max(1, ...buckets.map((b) => b.total));
-  // Clean ticks: a small integer count wants 1s, not 0.7s.
-  const step = peak <= 4 ? 1 : peak <= 8 ? 2 : Math.ceil(peak / 4);
-  const top = Math.ceil(peak / step) * step;
-  const ticks = [];
-  for (let v = 0; v <= top; v += step) ticks.push(v);
-
-  const yOf = (v) => padT + plotH - (v / top) * plotH;
-  const active = hover === null ? null : buckets[hover];
-
-  return (
-    <div ref={box} style={{ position: 'relative' }}>
-      <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H}
-        style={{ width: '100%', height: `${H}px`, display: 'block' }} role="img"
-        aria-label="Reports compiled each month, split by submission outcome">
-        {ticks.map((v) => (
-          <g key={v}>
-            <line x1={padL} x2={W - padR} y1={yOf(v)} y2={yOf(v)} stroke="#e5e7eb" strokeWidth="1" />
-            <text x={padL - 8} y={yOf(v) + 4} textAnchor="end" fontSize="11" fill="#6b7280">{v}</text>
-          </g>
-        ))}
-
-        {buckets.map((b, i) => {
-          const cx = padL + band * i + band / 2;
-          let cursor = padT + plotH;
-          const stack = SERIES.map((s) => ({ ...s, n: b[s.key] || 0 })).filter((s) => s.n > 0);
-          return (
-            <g key={b.key} opacity={hover === null || hover === i ? 1 : 0.5}>
-              {stack.map((s, j) => {
-                const h = (s.n / top) * plotH;
-                // 2px of surface between touching segments does the separating.
-                const gap = j < stack.length - 1 ? 2 : 0;
-                const drawn = Math.max(1, h - gap);
-                cursor -= h;
-                return (
-                  <path key={s.key} d={barPath(cx - barW / 2, cursor + gap, barW, drawn, j === stack.length - 1)}
-                    fill={s.color} />
-                );
-              })}
-              <text x={cx} y={H - 10} textAnchor="middle" fontSize="11" fill="#6b7280">{b.short}</text>
-              <rect x={padL + band * i} y={padT} width={band} height={plotH} fill="transparent"
-                onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)} />
-            </g>
-          );
-        })}
-        <line x1={padL} x2={W - padR} y1={padT + plotH} y2={padT + plotH} stroke="#d1d5db" strokeWidth="1" />
-      </svg>
-
-      {active && (() => {
-        const p = ((band * hover + band / 2 + padL) / W) * 100;
-        return (
-          <div style={{ ...TIP_STYLE, left: `${p}%`, transform: tipShift(p) }}>
-            <div className="fw-bold" style={{ marginBottom: '.25rem' }}>{active.label}</div>
-            {active.total === 0 ? <div className="text-secondary">Nothing compiled</div> : SERIES.map((s) => (
-              active[s.key] > 0 && (
-                <div key={s.key} className="d-flex items-center gap-2">
-                  <span style={{ width: 8, height: 8, borderRadius: 2, background: s.color, flex: 'none' }} />
-                  <span className="text-secondary">{s.label}</span>
-                  <span className="ms-auto fw-medium" style={{ paddingLeft: '.75rem' }}>{active[s.key]}</span>
-                </div>
-              )
-            ))}
-          </div>
-        );
-      })()}
-
-      <div className="d-flex gap-4 items-center flex-wrap" style={{ marginTop: '.75rem' }}>
-        {SERIES.map((s) => (
-          <span key={s.key} className="d-flex items-center gap-2" style={{ fontSize: '.75rem' }}>
-            <span style={{ width: 10, height: 10, borderRadius: 3, background: s.color, flex: 'none' }} />
-            <span className="text-secondary">{s.label}</span>
-          </span>
-        ))}
-      </div>
-    </div>
-  );
-}
 
 /* ------------------------------------------------------------ rate trend
  *
@@ -340,34 +198,15 @@ function FacilityView({ loading, rows, types, meta, agents, user }) {
   // one that has been waiting longest.
   const oldestDraft = drafts.length ? drafts[drafts.length - 1] : null;
 
-  /* Twelve months back from this one, by the date the report was compiled.
-     Bucketing on generated_at rather than the reporting period is what lets
-     monthly, weekly and quarterly reports share one axis honestly. */
-  const buckets = (() => {
-    const now = new Date();
-    const out = [];
-    for (let i = 11; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      out.push({
-        key: `${d.getFullYear()}-${d.getMonth()}`,
-        short: MONTHS[d.getMonth()].slice(0, 3),
-        label: `${MONTHS[d.getMonth()]} ${d.getFullYear()}`,
-        PUSHED: 0, DRAFT: 0, FAILED: 0, total: 0,
-      });
-    }
-    const index = new Map(out.map((b) => [b.key, b]));
-    for (const r of rows) {
-      const d = new Date(r.generated_at);
-      if (Number.isNaN(d.getTime())) continue;
-      const b = index.get(`${d.getFullYear()}-${d.getMonth()}`);
-      if (!b) continue;
-      if (b[r.push_status] === undefined) continue;
-      b[r.push_status] += 1;
-      b.total += 1;
-    }
-    return out;
-  })();
-  const compiledThisYear = buckets.reduce((a, b) => a + b.total, 0);
+  /* Reports compiled in the last twelve months, for the tile footnote.
+     Counted on generated_at rather than the reporting period, which is what
+     lets monthly, weekly and quarterly reports be counted together. */
+  const cutoff = new Date();
+  cutoff.setMonth(cutoff.getMonth() - 12);
+  const compiledThisYear = rows.filter((r) => {
+    const d = new Date(r.generated_at);
+    return !Number.isNaN(d.getTime()) && d >= cutoff;
+  }).length;
 
   const latestByType = new Map();
   for (const r of rows) if (!latestByType.has(r.type)) latestByType.set(r.type, r);
@@ -406,26 +245,16 @@ function FacilityView({ loading, rows, types, meta, agents, user }) {
         <div className="card flush">
           <div className="card-header">
             <div>
-              <h2 className="card-title">Compilation activity</h2>
-              <div className="card-subtitle">Reports compiled each month, by submission outcome</div>
+              <h2 className="card-title">Malaria channel</h2>
+              <div className="card-subtitle">
+                Cases by ISO week, against percentile bands from previous years
+              </div>
             </div>
             <div className="card-actions">
               <Link href="/reports" className="btn secondary sm">All reports<IconArrowRight size={14} /></Link>
             </div>
           </div>
-          <div className="card-body">
-            {loading ? <div className="text-secondary">Loading…</div>
-              : rows.length === 0 ? (
-                <div className="empty">
-                  <div className="empty-icon"><IconDraft size={40} /></div>
-                  <div className="empty-title">Nothing has been compiled yet</div>
-                  <div className="empty-subtitle">
-                    Once a register extract or weekly tally has been compiled, the month-by-month
-                    record of what was submitted appears here.
-                  </div>
-                </div>
-              ) : <ActivityChart buckets={buckets} />}
-          </div>
+          <div className="card-body"><MalariaChannel scope="facility" /></div>
         </div>
 
         <div className="card flush">

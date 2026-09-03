@@ -1,5 +1,6 @@
 'use client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import useWidth from './usewidth';
 
 /* District choropleth for the region.
  *
@@ -143,18 +144,7 @@ export default function DistrictMap({ homeDistrictOnly = false }) {
   const [error, setError] = useState('');
   const [hover, setHover] = useState(null);
   const box = useRef(null);
-  const [width, setWidth] = useState(640);
-
-  useEffect(() => {
-    const el = box.current;
-    if (!el || typeof ResizeObserver === 'undefined') return undefined;
-    const ro = new ResizeObserver(([e]) => {
-      const w = Math.round(e.contentRect.width);
-      if (w > 0) setWidth(w);
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [geo]);
+  const width = useWidth(box, 640);
 
   // Outlines and the catalogue are both stable; fetch them once, together.
   useEffect(() => {

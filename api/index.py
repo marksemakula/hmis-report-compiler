@@ -505,6 +505,36 @@ def map_value_lookup(indicator: str, period: str, user: dict = Depends(current_u
         err(f"The district figures could not be read: {type(exc).__name__}", 502)
 
 
+# ---------------- malaria channel ----------------
+
+@app.get("/api/py/malaria/elements")
+def malaria_element_list(user: dict = Depends(current_user)):
+    """The 033B elements that could carry malaria case counts, resolved from
+    cached metadata by name rather than hard-coded."""
+    try:
+        return {"elements": analytics.malaria_elements()}
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        err(f"The malaria element list could not be built: {type(exc).__name__}", 502)
+
+
+@app.get("/api/py/malaria/channel")
+def malaria_channel(element: str = "", scope: str = "facility", year: int = None,
+                    baseline: int = 5, user: dict = Depends(current_user)):
+    """Weekly malaria cases against percentile bands built from previous years -
+    the endemic-channel method Uganda uses to detect epidemics."""
+    try:
+        return analytics.malaria_channel(element=element, scope=scope,
+                                         year=year, baseline=baseline)
+    except RuntimeError:
+        raise
+    except requests.HTTPError as exc:
+        err(f"DHIS2 rejected the analytics request: {exc}", 502)
+    except Exception as exc:
+        err(f"The malaria channel could not be built: {type(exc).__name__}", 502)
+
+
 # ---------------- audit ----------------
 
 @app.get("/api/py/audit")

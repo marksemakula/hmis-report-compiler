@@ -92,6 +92,17 @@ class StubSession:
                 # A point, which cannot be shaded and must be skipped.
                 {"id": "dist_point", "name": "A Facility", "level": 6,
                  "geometry": {"type": "Point", "coordinates": [33.2, 0.44]}},
+                # A position carrying altitude as a third ordinate, which is
+                # legal GeoJSON and used to make the whole district vanish.
+                {"id": "dist_alt", "name": "Buyende District", "level": 3, "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[[33.0, 1.1, 1140.0], [33.1, 1.1, 1140.0],
+                                     [33.1, 1.2, 1140.0], [33.0, 1.2, 1140.0],
+                                     [33.0, 1.1, 1140.0]]]}},
+                # Pre-2.36 DHIS2: a `coordinates` JSON string, no `geometry`.
+                {"id": "dist_legacy", "name": "Kaliro District", "level": 3,
+                 "featureType": "MULTI_POLYGON",
+                 "coordinates": "[[[[33.7,1.0],[33.8,1.0],[33.8,1.1],[33.7,1.1],[33.7,1.0]]]]"},
             ]})
         if "/organisationUnits/" in url:
             return Response({
@@ -335,8 +346,15 @@ check("paging is off, so a region is never truncated", ou_call["paging"], "false
 
 names = [d["name"] for d in geo["districts"]]
 check("only shadeable shapes are kept",
-      names, ["Jinja City", "Kamuli District", "Mayuge District"])
+      names, ["Buyende District", "Jinja City", "Kaliro District",
+              "Kamuli District", "Mayuge District"])
 check("a Point is skipped rather than drawn", "A Facility" in names, False)
+# Both of these used to drop a whole district without a word.
+check("a position with altitude keeps its district", "Buyende District" in names, True)
+check("...and the altitude ordinate is discarded",
+      [d for d in geo["districts"] if d["name"] == "Buyende District"][0]
+      ["geometry"]["coordinates"][0][0], [33.0, 1.1])
+check("a pre-2.36 coordinates string is understood", "Kaliro District" in names, True)
 check("a district with no boundary is named, not silently dropped",
       geo["withoutGeometry"], ["Bugweri District"])
 
@@ -350,7 +368,7 @@ kamuli = [d for d in geo["districts"] if d["name"] == "Kamuli District"][0]
 check("coordinates are rounded to district precision",
       kamuli["geometry"]["coordinates"][0][0], [33.1099, 0.9012])
 
-check("the bounding box spans every shape", geo["bbox"], [33.1, 0.05, 33.62, 1.1])
+check("the bounding box spans every shape", geo["bbox"], [33.0, 0.05, 33.8, 1.2])
 check("the hospital's own district is named so the map can mark it",
       geo["facilityDistrict"], "dist01")
 
@@ -454,6 +472,123 @@ try:
 except RuntimeError as exc:
     check("a 403 on the listing raises RuntimeError", True, True)
     check("...and names the variables to change", "DHIS2_USERNAME" in str(exc), True)
+
+# --------------------------------------------------------- malaria channel
+
+print("\nPercentiles match the linear-interpolation convention")
+# These thresholds decide whether an epidemic is declared, so the arithmetic is
+# pinned to known values rather than trusted.
+p = analytics._percentile
+check("median of an odd run", p([1, 2, 3, 4, 5], 50), 3.0)
+check("median of an even run interpolates", p([1, 2, 3, 4], 50), 2.5)
+check("75th of five", p([10, 20, 30, 40, 50], 75), 40.0)
+check("85th of five interpolates", round(p([10, 20, 30, 40, 50], 85), 2), 44.0)
+check("a single year gives that year", p([7], 75), 7.0)
+check("an empty baseline gives nothing, not zero", p([], 75), None)
+
+print("\nISO years of 52 and 53 weeks are both handled")
+check("2026 has 53 ISO weeks", analytics.iso_weeks_in_year(2026), 53)
+check("2025 has 52", analytics.iso_weeks_in_year(2025), 52)
+
+print("\nThe thresholds are the ones Uganda's guidance names")
+check("alert is the 75th percentile", analytics.ALERT_PERCENTILE, 75)
+check("epidemic is the 85th percentile", analytics.EPIDEMIC_PERCENTILE, 85)
+check("five years is the documented minimum baseline", analytics.MIN_BASELINE_YEARS, 5)
+
+
+class ChannelSession(StubSession):
+    """Weekly malaria counts: a flat baseline, then a current year that climbs
+    through the alert band and out the top of the channel."""
+
+    BASE = {2021: 100, 2022: 110, 2023: 90, 2024: 120, 2025: 105}
+
+    def _analytics(self, params):
+        dims = {d.split(":", 1)[0]: d.split(":", 1)[1] for d in params.get("dimension", [])}
+        rows = []
+        for pe in dims.get("pe", "").split(";"):
+            m = __import__("re").fullmatch(r"(\d{4})W(\d{1,2})", pe)
+            if not m:
+                continue
+            year, week = int(m.group(1)), int(m.group(2))
+            if year in self.BASE:
+                rows.append([dims["dx"], pe, dims["ou"], str(self.BASE[year])])
+            elif year == 2026 and week <= 10:
+                # 5 normal weeks, then alert, then frank epidemic.
+                rows.append([dims["dx"], pe, dims["ou"],
+                             str(95 if week <= 5 else 113 if week <= 7 else 400)])
+        return {"headers": [{"name": "dx"}, {"name": "pe"}, {"name": "ou"}, {"name": "value"}],
+                "metaData": {"items": {}}, "rows": rows}
+
+
+metadata._MAPPING["dataElements"] = {"HMIS033B": {
+    "de033bmala": {"name": "033B-CD05a. Malaria Cases"},
+    "de033bmalb": {"name": "033B-CD05b. Malaria Deaths"},
+    "de033bchol": {"name": "033B-CD01a. Cholera Cases"},
+}}
+
+print("\nThe malaria element is resolved from metadata, never hard-coded")
+els = analytics.malaria_elements()
+check("only malaria case elements are offered", [e["label"] for e in els], ["Malaria Cases"])
+check("malaria deaths are not a case series",
+      any("Deaths" in e["label"] for e in els), False)
+
+print("\nThe channel is built from the years before the one being read")
+analytics.reset_cache()
+s = ChannelSession()
+ch = analytics.malaria_channel(scope="facility", year=2026, baseline=5, session=s)
+check("the baseline is the five preceding years", ch["baselineYears"], [2021, 2022, 2023, 2024, 2025])
+check("the current year is not in its own baseline", 2026 in ch["baselineYears"], False)
+check("2026 is a 53-week year", len(ch["weeks"]), 53)
+check("the element chosen is the malaria one", ch["element"]["id"], "de033bmala")
+
+w1 = ch["weeks"][0]
+check("five baseline years contributed", w1["n"], 5)
+# sorted 90,100,105,110,120 -> median 105, p75 110, p85 114
+check("the median is the middle year", w1["median"], 105.0)
+check("the alert line is the 75th percentile", w1["alert"], 110.0)
+check("the epidemic line is the 85th percentile", round(w1["epidemic"], 1), 114.0)
+
+print("\nA week is classified against its own week's bands")
+check("a quiet week reads as normal", ch["weeks"][0]["current"], 95.0)
+check("week 6 crosses the alert line", ch["weeks"][5]["current"] > ch["weeks"][5]["alert"], True)
+check("...but not the epidemic line", ch["weeks"][5]["current"] > ch["weeks"][5]["epidemic"], False)
+check("week 8 clears the epidemic line", ch["weeks"][7]["current"] > ch["weeks"][7]["epidemic"], True)
+check("the latest reported week is the one classified", ch["latestWeek"], 10)
+check("and the facility is in epidemic", ch["status"], "epidemic")
+
+print("\nWeeks with no report are absent, not zero")
+check("a future week carries no current value", ch["weeks"][20]["current"], None)
+check("...and still carries its bands", ch["weeks"][20]["alert"], 110.0)
+
+print("\nA baseline shorter than the guidance says so")
+analytics.reset_cache()
+short = analytics.malaria_channel(scope="facility", year=2026, baseline=2,
+                                  session=ChannelSession())
+check("two years is fewer than the five the method needs",
+      short["baselineBelowGuidance"], True)
+check("...and the number actually used is reported", short["baselineYearsUsed"], 2)
+check("a full baseline is not flagged", ch["baselineBelowGuidance"], False)
+
+print("\nAn unusable request is refused with something to act on")
+try:
+    analytics.malaria_channel(scope="district", session=ChannelSession())
+    check("an unknown scope raises", True, False)
+except RuntimeError as exc:
+    check("an unknown scope raises", "Check the scope parameter" in str(exc), True)
+try:
+    analytics.malaria_channel(element="nope", session=ChannelSession())
+    check("a malformed element raises", True, False)
+except RuntimeError as exc:
+    check("a malformed element raises", "Check the element parameter" in str(exc), True)
+
+metadata._MAPPING["dataElements"] = {}
+analytics.reset_cache()
+try:
+    analytics.malaria_channel(session=ChannelSession())
+    check("no malaria element raises", True, False)
+except RuntimeError as exc:
+    check("no malaria element raises RuntimeError", True, True)
+    check("...and says to refresh metadata", "Refresh metadata" in str(exc), True)
 
 print("\nRows are read by header name, not by position")
 # Analytics puts the columns in whatever order the dimensions were given. A

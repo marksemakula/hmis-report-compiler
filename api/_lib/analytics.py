@@ -31,6 +31,7 @@ over a monthly period silently aggregates five weeks into one figure and reads
 as a rate above 100. The data sets are therefore grouped by periodType and each
 group is asked with its own period.
 """
+import json
 import os
 import re
 import time
@@ -437,7 +438,12 @@ def ranking(session=None, report_type: str = "OPD") -> dict:
 
 
 def _round_ring(ring):
-    return [[round(float(x), _COORD_DP), round(float(y), _COORD_DP)] for x, y in ring]
+    # A GeoJSON position is [lon, lat] but may legally carry a third element
+    # for altitude. Unpacking as `for x, y in ring` raises on those, which the
+    # caller would have swallowed as "no geometry" - a district silently
+    # missing from the map is the worst way for this to fail, so take the
+    # first two ordinates and ignore any others.
+    return [[round(float(p[0]), _COORD_DP), round(float(p[1]), _COORD_DP)] for p in ring]
 
 
 def _normalise_geometry(geo):
@@ -445,6 +451,14 @@ def _normalise_geometry(geo):
 
     Points are skipped: a facility carries one, and a dot cannot be shaded.
     """
+    # DHIS2 before 2.36 stored `featureType` plus a `coordinates` JSON string
+    # rather than a GeoJSON `geometry` object. Reshaping it here means an older
+    # instance draws a map instead of an empty card.
+    if isinstance(geo, str):
+        try:
+            geo = {"type": "MultiPolygon", "coordinates": json.loads(geo)}
+        except (TypeError, ValueError):
+            return None
     if not isinstance(geo, dict):
         return None
     kind = geo.get("type")
@@ -498,6 +512,8 @@ def districts(session=None) -> dict:
         without = []
         for ou in r.json().get("organisationUnits", []):
             raw = ou.get("geometry")
+            if raw is None and ou.get("coordinates"):
+                raw = ou["coordinates"]          # pre-2.36 shape
             geo = _normalise_geometry(raw)
             if geo is None:
                 # "No boundary in DHIS2" and "has a location but no area" are
@@ -667,6 +683,168 @@ def map_values(indicator: str, period: str, session=None) -> dict:
         "min": numbers[0] if numbers else None,
         "max": numbers[-1] if numbers else None,
         "reporting": len(values),
+    }
+
+
+# ------------------------------------------------------- the malaria channel
+#
+# A "malaria channel" is the endemic-channel method Uganda uses to decide
+# whether this week's malaria burden is an epidemic or simply the season. For
+# each ISO week it takes that same week's counts from several previous years
+# and reads percentiles off them; the current year is then plotted against
+# those bands.
+#
+# The percentiles are not a free choice. UNIPH's policy brief on detecting
+# malaria epidemics (uniph.go.ug) records that Uganda's guidelines use the 3rd
+# quartile at health-facility level, and recommends two thresholds - an ALERT
+# at the 75th percentile and an EPIDEMIC at the 85th - in preference to the
+# mean-plus-two-standard-deviations method, which assumes a normal distribution
+# that weekly case counts do not have. It also states the method needs five to
+# ten years of history, which is why a shorter baseline is reported rather than
+# quietly averaged over whatever happened to be there.
+
+ALERT_PERCENTILE = 75
+EPIDEMIC_PERCENTILE = 85
+MIN_BASELINE_YEARS = 5
+
+
+def _percentile(values: list, p: float):
+    """Linear-interpolation percentile, the same convention as numpy's default.
+
+    Written out rather than imported: this module runs in a Vercel function
+    where numpy is not a dependency, and the arithmetic is four lines.
+    """
+    if not values:
+        return None
+    ordered = sorted(values)
+    if len(ordered) == 1:
+        return float(ordered[0])
+    pos = (len(ordered) - 1) * (p / 100.0)
+    low = int(pos)
+    high = min(low + 1, len(ordered) - 1)
+    frac = pos - low
+    return float(ordered[low]) * (1 - frac) + float(ordered[high]) * frac
+
+
+def iso_weeks_in_year(year: int) -> int:
+    """52 or 53. 28 December is always in the last ISO week of its year."""
+    return date(year, 12, 28).isocalendar()[1]
+
+
+def malaria_elements() -> list:
+    """The 033B elements that could carry malaria case counts.
+
+    Resolved from the metadata cache by name, never hard-coded. This project
+    has already shipped mappings aimed at elements the Ministry had retired,
+    and a channel drawn from the wrong element would be worse than no channel:
+    it would look authoritative and declare epidemics off the wrong series.
+    """
+    out = []
+    for deid, info in (mapping().get("dataElements", {}).get("HMIS033B") or {}).items():
+        name = (info or {}).get("name") or ""
+        if not re.search(r"malaria", name, re.I):
+            continue
+        if not _CASE_NAME.search(name):
+            continue
+        out.append({"id": deid, "label": _CODE_PREFIX.sub("", name).strip() or name})
+    out.sort(key=lambda e: e["label"].lower())
+    return out
+
+
+def malaria_channel(element: str = "", scope: str = "facility", year: int = None,
+                    baseline: int = MIN_BASELINE_YEARS, session=None) -> dict:
+    """Weekly case counts against percentile bands built from previous years."""
+    scope = (scope or "facility").lower()
+    if scope not in SCOPES:
+        raise RuntimeError(
+            f"Unknown scope '{scope}'. Check the scope parameter; "
+            f"the dashboard scopes are: {', '.join(SCOPES)}.")
+
+    candidates = malaria_elements()
+    if element:
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9]{10}", element):
+            raise RuntimeError(
+                f"Unrecognised data element '{element}'. Check the element parameter; "
+                "it must be one of the ids returned by /api/py/malaria/elements.")
+        chosen = next((c for c in candidates if c["id"] == element),
+                      {"id": element, "label": "Selected element"})
+    elif candidates:
+        chosen = candidates[0]
+    else:
+        raise RuntimeError(
+            "No 033B malaria case element is available. The cached DHIS2 metadata "
+            "predates the surveillance report or does not carry element names. Set "
+            "DHIS2_USERNAME and DHIS2_PASSWORD (or DHIS2_PAT) and run Refresh metadata "
+            "in the admin page.")
+
+    today = date.today()
+    # The channel is read against the year in progress, and the baseline is the
+    # years before it - never the current one, which would let an epidemic
+    # raise its own threshold.
+    year = int(year or today.isocalendar()[0])
+    baseline = max(1, min(int(baseline or MIN_BASELINE_YEARS), 10))
+    baseline_years = list(range(year - baseline, year))
+
+    h = hierarchy(session=session)
+    ou = h[scope]
+
+    def weekly(y):
+        weeks = [f"{y}W{w}" for w in range(1, iso_weeks_in_year(y) + 1)]
+        res = query([chosen["id"]], ou["id"], ";".join(weeks), session=session)
+        out = {}
+        for row in res["rows"]:
+            m = re.fullmatch(r"(\d{4})W(\d{1,2})", str(row.get("pe") or "").upper())
+            v = _num(row.get("value"))
+            if m and v is not None:
+                out[int(m.group(2))] = v
+        return out
+
+    history = {y: weekly(y) for y in baseline_years}
+    current = weekly(year)
+
+    max_week = iso_weeks_in_year(year)
+    weeks = []
+    for w in range(1, max_week + 1):
+        past = [history[y][w] for y in baseline_years if w in history[y]]
+        weeks.append({
+            "week": w,
+            "n": len(past),
+            "median": _percentile(past, 50),
+            "alert": _percentile(past, ALERT_PERCENTILE),
+            "epidemic": _percentile(past, EPIDEMIC_PERCENTILE),
+            "current": current.get(w),
+        })
+
+    # Where the latest reported week sits, which is the question the chart is
+    # drawn to answer.
+    latest = next((w for w in reversed(weeks) if w["current"] is not None), None)
+    if latest is None or latest["epidemic"] is None:
+        status = "unknown"
+    elif latest["current"] > latest["epidemic"]:
+        status = "epidemic"
+    elif latest["alert"] is not None and latest["current"] > latest["alert"]:
+        status = "alert"
+    else:
+        status = "normal"
+
+    covered = [len([1 for y in baseline_years if w["week"] in history[y]]) for w in weeks]
+    return {
+        "element": chosen,
+        "elements": candidates,
+        "orgUnit": {"id": ou["id"], "name": ou["name"]},
+        "scope": scope,
+        "year": year,
+        "baselineYears": baseline_years,
+        "alertPercentile": ALERT_PERCENTILE,
+        "epidemicPercentile": EPIDEMIC_PERCENTILE,
+        "weeks": weeks,
+        "latestWeek": latest["week"] if latest else None,
+        "status": status,
+        # Said plainly rather than hidden: a channel built on two years is not
+        # the method the guidelines describe, and the reader must know that
+        # before acting on a threshold drawn from it.
+        "baselineYearsUsed": max(covered) if covered else 0,
+        "baselineBelowGuidance": (max(covered) if covered else 0) < MIN_BASELINE_YEARS,
     }
 
 
