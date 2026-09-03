@@ -87,8 +87,12 @@ export default function TbScreening() {
   useEffect(() => { load(); }, [load]);
 
   const series = (key, value, set, label) => {
-    const options = data?.candidates?.[key] || [];
-    if (options.length < 2) return null;
+    const matched = data?.candidates?.[key] || [];
+    // When the name matcher found nothing, offer every 033B element rather
+    // than nothing: the reader knows which line of the form they want, and a
+    // regex that failed to recognise a name is no reason to refuse to draw.
+    const options = matched.length ? matched : (data?.candidates?.all || []);
+    if (options.length < 2 && !data?.needsChoice) return null;
     return (
       <div style={{ marginTop: '.5rem' }}>
         <label htmlFor={`tb-${key}`}>{label}</label>
@@ -109,7 +113,7 @@ export default function TbScreening() {
         </select>
       </div>
       {series('attendance', attEl, setAttEl, 'Attendance series')}
-      {series('screened', scrEl, setScrEl, 'Screening series')}
+      {series('screened', scrEl, setScrEl, 'TB screening series')}
     </>
   );
 
@@ -161,7 +165,16 @@ export default function TbScreening() {
         </div>
       )}
 
-      {nothing ? (
+      {data.needsChoice ? (
+        <div className="alert warn" style={{ marginTop: '.75rem' }}>
+          {data.candidates.cached} HMIS 033B elements are cached, but none is named
+          recognisably as
+          {!data.matched.attendance && !data.matched.screened
+            ? ' total attendance or TB screening'
+            : !data.matched.attendance ? ' total attendance' : ' TB screening'}.
+          Choose the right line of the form above and the figure will be drawn from it.
+        </div>
+      ) : nothing ? (
         <div className="empty" style={{ padding: '1.5rem 0 .5rem' }}>
           <div className="empty-subtitle">
             No 033B attendance was reported for {data.orgUnit.name} over {data.periodLabel}.

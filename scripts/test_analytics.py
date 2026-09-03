@@ -649,6 +649,7 @@ check("the two slices partition attendance",
 check("the share is screened over attendance", tb["rate"], 25.0)
 check("the label says it is a run of weeks",
       tb["periodLabel"].startswith("Weeks 1 to "), True)
+check("a recognised pair needs no choice", tb["needsChoice"], False)
 
 print("\nWeeks nobody filed are absent from the total and counted separately")
 check("only the weeks that reported are counted", tb["weeksReported"], 20)
@@ -699,14 +700,44 @@ try:
 except RuntimeError as exc:
     check("a malformed element is refused", "Check the parameter" in str(exc), True)
 
-print("\nNo 033B metadata says to refresh rather than guessing a series")
+print("\nA name the matcher does not recognise offers a choice, not a dead end")
+# The real 033B names differ between instances and form revisions. Refusing to
+# draw anything, and telling the operator to refresh metadata they already
+# have, sends them to fix something that is not broken.
+metadata._MAPPING["dataElements"] = {"HMIS033B": {
+    "de033bxxx01": {"name": "033B-AP01. Persons seen this week"},
+    "de033bxxx02": {"name": "033B-AP02. Presumptive TB investigated"},
+}}
+analytics.reset_cache()
+odd = analytics.tb_screening(scope="facility", year=2026, session=ScreeningSession())
+check("it does not raise", isinstance(odd, dict), True)
+check("it says a choice is needed", odd["needsChoice"], True)
+check("...and offers every cached element to choose from",
+      len(odd["candidates"]["all"]), 2)
+check("...naming how many are cached", odd["candidates"]["cached"], 2)
+check("no figure is invented from an unconfirmed element", odd["attendance"], None)
+check("...and the share is withheld too", odd["rate"], None)
+check("which series matched is reported", odd["matched"],
+      {"attendance": False, "screened": False})
+
+print("\nA chosen pair is honoured even when the matcher recognised neither")
+analytics.reset_cache()
+fixed = analytics.tb_screening(scope="facility", year=2026, attendance="de033bxxx01",
+                               screened="de033bxxx02", session=ScreeningSession())
+check("choosing both resolves it", fixed["needsChoice"], False)
+check("the chosen attendance element is used",
+      fixed["elements"]["attendance"]["id"], "de033bxxx01")
+
+print("\nAn empty 033B listing is the one case that really is a metadata problem")
 metadata._MAPPING["dataElements"] = {}
 analytics.reset_cache()
 try:
     analytics.tb_screening(session=ScreeningSession())
-    check("an unresolvable series raises", True, False)
+    check("an empty listing raises", True, False)
 except RuntimeError as exc:
-    check("an unresolvable series raises", "Refresh metadata" in str(exc), True)
+    check("an empty listing raises", "Refresh metadata" in str(exc), True)
+    check("...and says the list is empty, not that a name was unmatched",
+          "element list is empty" in str(exc), True)
 
 print("\nRows are read by header name, not by position")
 # Analytics puts the columns in whatever order the dimensions were given. A

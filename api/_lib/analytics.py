@@ -709,7 +709,12 @@ def map_values(indicator: str, period: str, session=None) -> dict:
 # split returned here partitions attendance into screened and not screened,
 # which is a genuine part-to-whole.
 
-_ATTENDANCE_RE = re.compile(r"attendance", re.I)
+# 033B names vary between instances and the Ministry rewords them between form
+# revisions, so these are a first guess at which element is which, never the
+# authority. When a guess misses, the endpoint returns the whole 033B list and
+# asks the reader to pick rather than refusing to draw anything: a regex that
+# does not recognise a name is a reason to offer a choice, not a dead end.
+_ATTENDANCE_RE = re.compile(r"attendance|attendances|out[\s-]?patient|\bopd\b", re.I)
 _TB_RE = re.compile(r"\btb\b|tubercul", re.I)
 _SCREEN_RE = re.compile(r"screen", re.I)
 
@@ -720,21 +725,30 @@ def _surveillance_elements() -> dict:
 
 
 def tb_screening_candidates() -> dict:
-    """The 033B elements that could be the attendance and TB-screening series."""
-    attendance, screened = [], []
+    """The 033B elements that could be the attendance and TB-screening series,
+    plus the full list so a missed guess can still be resolved by hand."""
+    attendance, screened, every = [], [], []
     for deid, info in _surveillance_elements().items():
         name = (info or {}).get("name") or ""
-        label = _CODE_PREFIX.sub("", name).strip() or name
+        entry = {"id": deid, "label": _CODE_PREFIX.sub("", name).strip() or name}
+        every.append(entry)
         if _SCREEN_RE.search(name) and _TB_RE.search(name):
-            screened.append({"id": deid, "label": label})
+            screened.append(entry)
         elif _ATTENDANCE_RE.search(name):
-            attendance.append({"id": deid, "label": label})
-    attendance.sort(key=lambda e: e["label"].lower())
-    screened.sort(key=lambda e: e["label"].lower())
-    return {"attendance": attendance, "screened": screened}
+            attendance.append(entry)
+    for group in (attendance, screened, every):
+        group.sort(key=lambda e: e["label"].lower())
+    return {"attendance": attendance, "screened": screened,
+            "all": every, "cached": len(every)}
 
 
-def _pick(chosen: str, options: list, what: str) -> dict:
+def _pick(chosen: str, options: list, what: str):
+    """The element to use, or None if nothing matched and the caller should ask.
+
+    Raising here was wrong. A name this file failed to recognise is not a
+    missing metadata cache, and telling an operator to refresh metadata they
+    already have sends them to fix something that is not broken.
+    """
     if chosen:
         if not re.fullmatch(r"[A-Za-z][A-Za-z0-9]{10}", chosen):
             raise RuntimeError(
@@ -742,13 +756,7 @@ def _pick(chosen: str, options: list, what: str) -> dict:
                 "be one of the ids returned by /api/py/tb-screening.")
         return next((o for o in options if o["id"] == chosen),
                     {"id": chosen, "label": "Selected element"})
-    if not options:
-        raise RuntimeError(
-            f"No HMIS 033B element could be matched for {what}. The cached DHIS2 "
-            "metadata carries no 033B element names, so the series cannot be resolved. "
-            "Set DHIS2_USERNAME and DHIS2_PASSWORD (or DHIS2_PAT) and run Refresh "
-            "metadata in the admin page.")
-    return options[0]
+    return options[0] if options else None
 
 
 def tb_screening(scope: str = "facility", year: int = None, attendance: str = "",
@@ -760,8 +768,15 @@ def tb_screening(scope: str = "facility", year: int = None, attendance: str = ""
             f"the dashboard scopes are: {', '.join(SCOPES)}.")
 
     options = tb_screening_candidates()
-    att_el = _pick(attendance, options["attendance"], "attendance")
-    scr_el = _pick(screened, options["screened"], "TB screening")
+    # Nothing cached at all is the one case that really is a metadata problem.
+    if not options["cached"]:
+        raise RuntimeError(
+            "The HMIS 033B element list is empty, so no series can be resolved. The "
+            "cached DHIS2 metadata predates this report. Set DHIS2_USERNAME and "
+            "DHIS2_PASSWORD (or DHIS2_PAT) and run Refresh metadata in the admin page.")
+
+    att_el = _pick(attendance, options["attendance"] or options["all"], "attendance")
+    scr_el = _pick(screened, options["screened"] or options["all"], "TB screening")
 
     today = date.today()
     iso_year, iso_week, _ = today.isocalendar()
@@ -769,10 +784,34 @@ def tb_screening(scope: str = "facility", year: int = None, attendance: str = ""
     # Weeks 1 to the current week of the year being read; a past year runs to
     # its own last week rather than stopping where this year happens to be.
     through = iso_week if year == iso_year else iso_weeks_in_year(year)
-    weeks = [f"{year}W{w}" for w in range(1, through + 1)]
+
+    base = {
+        "scope": scope,
+        "year": year,
+        "throughWeek": through,
+        "periodLabel": f"Weeks 1 to {through}, {year}",
+        "elements": {"attendance": att_el, "screened": scr_el},
+        "candidates": options,
+        # True when this file could not tell which element is which. The figures
+        # are withheld rather than guessed, and the caller offers the 033B list.
+        "needsChoice": not (options["attendance"] and options["screened"])
+                       and not (attendance and screened),
+        "matched": {"attendance": bool(options["attendance"]),
+                    "screened": bool(options["screened"])},
+    }
 
     h = hierarchy(session=session)
     ou = h[scope]
+    base["orgUnit"] = {"id": ou["id"], "name": ou["name"]}
+
+    if base["needsChoice"]:
+        # A figure drawn from an element nobody confirmed would look exactly as
+        # authoritative as a correct one, which is the worst outcome available.
+        return {**base, "attendance": None, "screened": None, "notScreened": None,
+                "rate": None, "reported": False, "inconsistent": False,
+                "weeksReported": 0, "weeksElapsed": through}
+
+    weeks = [f"{year}W{w}" for w in range(1, through + 1)]
     res = query([att_el["id"], scr_el["id"]], ou["id"], ";".join(weeks), session=session)
 
     totals = {att_el["id"]: 0.0, scr_el["id"]: 0.0}
@@ -794,26 +833,17 @@ def tb_screening(scope: str = "facility", year: int = None, attendance: str = ""
     # was filed and the other was not, and it must not be drawn as a slice
     # larger than the pie.
     inconsistent = reported and scr > att
-    not_screened = max(0.0, att - scr)
 
     return {
-        "scope": scope,
-        "orgUnit": {"id": ou["id"], "name": ou["name"]},
-        "year": year,
-        "throughWeek": through,
+        **base,
         "weeksReported": len(reported_weeks),
         "weeksElapsed": through,
-        "periodLabel": f"Weeks 1 to {through}, {year}",
         "attendance": int(att),
         "screened": int(scr),
-        "notScreened": int(not_screened),
+        "notScreened": int(max(0.0, att - scr)),
         "rate": round(100 * scr / att, 1) if att else None,
         "reported": reported,
         "inconsistent": inconsistent,
-        # Returned so the picker can offer alternatives and the figure can be
-        # audited against the form rather than taken on trust.
-        "elements": {"attendance": att_el, "screened": scr_el},
-        "candidates": options,
     }
 
 
