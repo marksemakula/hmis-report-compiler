@@ -9,6 +9,7 @@ import {
 import DistrictMap from './districtmap';
 import MalariaChannel from './malariachannel';
 import Mortality from './mortality';
+import TbScreening from './tbscreening';
 import useWidth from './usewidth';
 
 /* ---------------------------------------------------------------- periods */
@@ -143,14 +144,14 @@ function RateTrend({ points }) {
 
 /* --------------------------------------------------------------- pieces */
 
-function StatTile({ Icon, tone, label, value, foot }) {
+function StatTile({ Icon, tone, label, value, foot, valueTone }) {
   return (
     <div className="card">
       <div className="stat">
         <span className={`avatar soft-${tone}`}><Icon size={20} /></span>
         <div className="stat-body">
           <div className="page-pretitle">{label}</div>
-          <div className="stat-value">{value}</div>
+          <div className={`stat-value${valueTone ? ` is-${valueTone}` : ''}`}>{value}</div>
           {foot && <div className="stat-foot">{foot}</div>}
         </div>
       </div>
@@ -199,16 +200,6 @@ function FacilityView({ loading, rows, types, meta, agents, user }) {
   // one that has been waiting longest.
   const oldestDraft = drafts.length ? drafts[drafts.length - 1] : null;
 
-  /* Reports compiled in the last twelve months, for the tile footnote.
-     Counted on generated_at rather than the reporting period, which is what
-     lets monthly, weekly and quarterly reports be counted together. */
-  const cutoff = new Date();
-  cutoff.setMonth(cutoff.getMonth() - 12);
-  const compiledThisYear = rows.filter((r) => {
-    const d = new Date(r.generated_at);
-    return !Number.isNaN(d.getTime()) && d >= cutoff;
-  }).length;
-
   const latestByType = new Map();
   for (const r of rows) if (!latestByType.has(r.type)) latestByType.set(r.type, r);
   const warnings = healthWarnings(meta, agents);
@@ -230,15 +221,23 @@ function FacilityView({ loading, rows, types, meta, agents, user }) {
           been dropped - it reads on the Reports page, where the submissions
           themselves are. */}
       <div className="row-cards" style={{ marginBottom: 'var(--tblr-page-padding)',
-        gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) minmax(0,1.6fr)',
+        gridTemplateColumns: 'minmax(0,1.6fr) minmax(0,1fr) minmax(0,1fr) minmax(0,1.6fr)',
         alignItems: 'start' }}>
-        <StatTile Icon={IconDraft} tone="primary" label="Reports compiled"
-          value={loading ? '' : nf(rows.length)}
-          foot={loading ? ' ' : `${nf(compiledThisYear)} in the last 12 months`} />
+        {/* TB screening takes the place the "Reports compiled" counter held.
+            A count of what this app compiled is a number about the app; the
+            share of attendances screened is a number about the hospital, and
+            the compiled total still reads on the Reports page. */}
+        <div className="card flush">
+          <div className="card-body">
+            <div className="page-pretitle">TB screening of attendances</div>
+            <TbScreening />
+          </div>
+        </div>
         <StatTile Icon={IconInbox} tone="warning" label="Awaiting submission"
           value={loading ? '—' : nf(drafts.length)}
           foot={loading ? ' ' : oldestDraft ? `Oldest: ${formatPeriod(oldestDraft.period)}` : 'Nothing waiting'} />
         <StatTile Icon={IconAlert} tone="danger" label="Failed submissions"
+          valueTone={failed.length ? 'danger' : undefined}
           value={loading ? '' : nf(failed.length)}
           foot={loading ? ' ' : failed.length ? `Most recent: ${formatPeriod(failed[0].period)}` : 'None recorded'} />
         <Mortality />

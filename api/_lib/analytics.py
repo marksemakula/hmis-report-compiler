@@ -686,6 +686,90 @@ def map_values(indicator: str, period: str, session=None) -> dict:
     }
 
 
+# --------------------------------------------------------- TB screening share
+#
+# What share of outpatient attendances were screened for TB. Two facts about
+# the figures shape this, and both are worth stating rather than working
+# around silently.
+#
+# First, the cadence. Attendance (OA01, OA02) and TB screening (TP01a) are
+# elements of HMIS 105:01, which is a MONTHLY return. There is no weekly
+# attendance or TB-screening element anywhere in the eight registered data
+# sets, so this can only be read for a month; the endpoint says which month it
+# used rather than labelling a month as a week.
+#
+# Second, the shape. Screened-for-TB is a SUBSET of attendance, not a sibling
+# of it. A pie of "attendance" against "screened" would draw the screened
+# patients twice and its slices would sum to something that is not a
+# population. So the split returned here partitions attendance into screened
+# and not screened, which is a genuine part-to-whole and answers the question
+# a reader actually has.
+
+ATTENDANCE_CODES = ("OA01", "OA02")
+TB_SCREENED_CODE = "TP01a"     # 105-TP01a. No. screened for TB-OPD
+
+
+def tb_screening(scope: str = "facility", period: str = None, session=None) -> dict:
+    scope = (scope or "facility").lower()
+    if scope not in SCOPES:
+        raise RuntimeError(
+            f"Unknown scope '{scope}'. Check the scope parameter; "
+            f"the dashboard scopes are: {', '.join(SCOPES)}.")
+
+    index = mapping().get("HMIS105_01_codeIndex") or {}
+    attendance_ids = [index[c] for c in ATTENDANCE_CODES if index.get(c)]
+    screened_id = index.get(TB_SCREENED_CODE)
+    if not attendance_ids or not screened_id:
+        missing = [c for c in ATTENDANCE_CODES + (TB_SCREENED_CODE,) if not index.get(c)]
+        raise RuntimeError(
+            "The HMIS 105:01 element list does not carry "
+            f"{', '.join(missing)}. The cached DHIS2 metadata is incomplete. Set "
+            "DHIS2_USERNAME and DHIS2_PASSWORD (or DHIS2_PAT) and run Refresh metadata "
+            "in the admin page.")
+
+    period = str(period or periods.default_period("Monthly")).upper()
+    if not re.fullmatch(r"\d{6}", period):
+        raise RuntimeError(
+            f"Unrecognised period '{period}'. Check the period parameter; "
+            "105:01 is a monthly return, so it must be YYYYMM.")
+
+    h = hierarchy(session=session)
+    ou = h[scope]
+    res = query(attendance_ids + [screened_id], ou["id"], period, session=session)
+
+    totals = {}
+    for row in res["rows"]:
+        v = _num(row.get("value"))
+        if v is not None:
+            totals[row.get("dx")] = totals.get(row.get("dx"), 0) + v
+
+    attendance = sum(totals.get(i, 0) for i in attendance_ids) if totals else 0
+    screened = totals.get(screened_id, 0)
+    reported = bool(totals)
+
+    # More screened than attended cannot be true. It happens when one element
+    # was filed and the other was not, and it must not be drawn as a slice
+    # larger than the pie.
+    inconsistent = reported and screened > attendance
+    not_screened = max(0.0, attendance - screened)
+
+    return {
+        "scope": scope,
+        "orgUnit": {"id": ou["id"], "name": ou["name"]},
+        "period": period,
+        "periodLabel": periods.describe("Monthly", period),
+        "attendance": int(attendance),
+        "screened": int(screened),
+        "notScreened": int(not_screened),
+        "rate": round(100 * screened / attendance, 1) if attendance else None,
+        "reported": reported,
+        "inconsistent": inconsistent,
+        # Named so the figure can be audited against the form rather than
+        # taken on trust.
+        "elements": {"attendance": list(ATTENDANCE_CODES), "screened": TB_SCREENED_CODE},
+    }
+
+
 # ------------------------------------------------------- the malaria channel
 #
 # A "malaria channel" is the endemic-channel method Uganda uses to decide
@@ -824,9 +908,9 @@ def _resolve_org_unit(ou: str, scope: str, session=None) -> dict:
     match = next((f for f in region_facilities(session=session) if f["id"] == ou), None)
     if not match:
         raise RuntimeError(
-            f"'{ou}' is not a facility in {h['region']['name']}. The channel can be "
-            "drawn for this hospital, the region, the country, or any facility in "
-            "the regional list.")
+            f"'{ou}' is not a facility in {h['region']['name']}. Use this hospital, the "
+            "region, the country, or any facility in the regional list at "
+            "/api/py/malaria/facilities.")
     return {**match, "scope": "facility", "level": h["facilityLevel"]}
 
 

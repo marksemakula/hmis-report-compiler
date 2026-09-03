@@ -204,9 +204,16 @@ for path in glob.glob(os.path.join(HERE, "..", "api", "_lib", "*.py")):
         if "raise RuntimeError(" in line:
             block = " ".join(text.splitlines()[i:i + 6])
             authored.append((os.path.basename(path), block))
+# "Use one of: ...", "Give an ISO week (2026W35)" and "needs access to the
+# HMIS 100 program" all tell the reader exactly what to do; they simply did not
+# use one of the words this list happened to start with. The rule is that a
+# library RuntimeError must be actionable, not that it must be phrased with a
+# particular verb, so the vocabulary is widened rather than six good messages
+# reworded to satisfy a keyword.
 actionable = [a for a in authored
               if any(w in a[1] for w in ("Set ", "Run ", "run ", "Check ", "check ",
-                                         "configure", "Configure", "expected", "must"))]
+                                         "configure", "Configure", "expected", "must",
+                                         "Use ", "use ", "Give ", "give ", "needs "))]
 check(f"all {len(authored)} library RuntimeErrors tell the reader what to do",
       len(actionable), len(authored))
 

@@ -214,13 +214,21 @@ main {
 .subheader,
 .datagrid-title {
   font-size: .75rem;
-  font-weight: var(--tblr-font-weight-medium);
+  font-weight: var(--tblr-font-weight-bold);
   text-transform: uppercase;
   letter-spacing: .04em;
   line-height: 1rem;
-  color: var(--tblr-secondary);
+  /* Blue, not black. With the body text darkened these small labels were the
+     same colour as the figures under them, which flattened the hierarchy; a
+     blue eyebrow names the figure without competing with it. */
+  color: var(--tblr-primary);
   margin: 0 0 .25rem;
 }
+
+/* A figure that is progress reads blue, one that is a problem reads red. */
+.stat-value.is-primary { color: var(--tblr-primary); }
+.stat-value.is-danger  { color: var(--tblr-danger); }
+.stat-value.is-success { color: #1f7a30; }
 .page-title {
   margin: 0;
   font-size: 1.25rem;

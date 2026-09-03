@@ -506,6 +506,25 @@ def map_value_lookup(indicator: str, period: str, user: dict = Depends(current_u
         err(f"The district figures could not be read: {type(exc).__name__}", 502)
 
 
+# ---------------- TB screening share ----------------
+
+@app.get("/api/py/tb-screening")
+def tb_screening(scope: str = "facility", period: str = None,
+                 user: dict = Depends(current_user)):
+    """Outpatient attendance split into screened and not screened for TB.
+
+    105:01 is a monthly return, so this is a month even though the tile it
+    feeds sits beside weekly figures; the response says which month."""
+    try:
+        return analytics.tb_screening(scope=scope, period=period)
+    except RuntimeError:
+        raise
+    except requests.HTTPError as exc:
+        err(f"DHIS2 rejected the analytics request: {exc}", 502)
+    except Exception as exc:
+        err(f"The screening figures could not be read: {type(exc).__name__}", 502)
+
+
 # ---------------- malaria channel ----------------
 
 @app.get("/api/py/malaria/elements")

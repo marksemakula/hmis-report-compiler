@@ -590,6 +590,84 @@ except RuntimeError as exc:
     check("no malaria element raises RuntimeError", True, True)
     check("...and says to refresh metadata", "Refresh metadata" in str(exc), True)
 
+# ----------------------------------------------------------- TB screening
+
+class ScreeningSession(StubSession):
+    """105:01 attendance and TB screening for one month."""
+
+    VALUES = {"sv6SeKroHPV": 4200, "sQ4EexvvhVe": 2600, "LwMHVYBkzx9": 1700}
+
+    def _analytics(self, params):
+        dims = {d.split(":", 1)[0]: d.split(":", 1)[1] for d in params.get("dimension", [])}
+        rows = [[dx, dims["pe"], dims["ou"], str(self.VALUES[dx])]
+                for dx in dims["dx"].split(";") if dx in self.VALUES]
+        return {"headers": [{"name": "dx"}, {"name": "pe"}, {"name": "ou"}, {"name": "value"}],
+                "metaData": {"items": {}}, "rows": rows}
+
+
+metadata._MAPPING["HMIS105_01_codeIndex"] = {
+    "OA01": "sv6SeKroHPV", "OA02": "sQ4EexvvhVe", "TP01a": "LwMHVYBkzx9",
+}
+
+print("\nAttendance is the sum of new and re-attendance")
+analytics.reset_cache()
+tb = analytics.tb_screening(scope="facility", period="202607", session=ScreeningSession())
+check("attendance sums OA01 and OA02", tb["attendance"], 6800)
+check("screened is TP01a alone", tb["screened"], 1700)
+# The whole point of the split: the two slices must total the attendance.
+check("the two slices partition attendance",
+      tb["screened"] + tb["notScreened"], tb["attendance"])
+check("the share is screened over attendance", tb["rate"], 25.0)
+check("the elements used are named for auditing",
+      tb["elements"], {"attendance": ["OA01", "OA02"], "screened": "TP01a"})
+
+print("\n105:01 is monthly, so the period must be a month")
+analytics.reset_cache()
+check("the default period is a month",
+      len(analytics.tb_screening(scope="facility", session=ScreeningSession())["period"]), 6)
+try:
+    analytics.tb_screening(period="2026W35", session=ScreeningSession())
+    check("a week is refused", True, False)
+except RuntimeError as exc:
+    check("a week is refused", "monthly return" in str(exc), True)
+
+print("\nMore screened than attended cannot be drawn as a slice bigger than the pie")
+
+
+class BadScreeningSession(ScreeningSession):
+    VALUES = {"sv6SeKroHPV": 100, "sQ4EexvvhVe": 0, "LwMHVYBkzx9": 500}
+
+
+analytics.reset_cache()
+bad = analytics.tb_screening(scope="facility", period="202607", session=BadScreeningSession())
+check("the inconsistency is flagged", bad["inconsistent"], True)
+check("not-screened never goes negative", bad["notScreened"], 0)
+
+print("\nA month nobody filed is reported as unreported, not as zero screening")
+
+
+class EmptyScreeningSession(ScreeningSession):
+    VALUES = {}
+
+
+analytics.reset_cache()
+empty = analytics.tb_screening(scope="facility", period="202607", session=EmptyScreeningSession())
+check("nothing reported is said so", empty["reported"], False)
+check("...and the share is None rather than 0", empty["rate"], None)
+
+print("\nMissing metadata names the codes it could not find")
+_saved_index = metadata._MAPPING["HMIS105_01_codeIndex"]
+metadata._MAPPING["HMIS105_01_codeIndex"] = {"OA01": "sv6SeKroHPV"}
+analytics.reset_cache()
+try:
+    analytics.tb_screening(session=ScreeningSession())
+    check("incomplete metadata raises", True, False)
+except RuntimeError as exc:
+    check("incomplete metadata raises", "OA02" in str(exc) and "TP01a" in str(exc), True)
+    check("...and says to refresh metadata", "Refresh metadata" in str(exc), True)
+metadata._MAPPING["HMIS105_01_codeIndex"] = _saved_index
+
+
 print("\nRows are read by header name, not by position")
 # Analytics puts the columns in whatever order the dimensions were given. A
 # reader that assumed dx/pe/ou/value would silently transpose two fields.
