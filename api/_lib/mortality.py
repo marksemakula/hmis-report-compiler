@@ -47,6 +47,7 @@ MCCOD_PROGRAM_NAME = "Medical Certificate of Cause of Death"
 UNDERLYING_CAUSE = "QTKk2Xt8KDu"   # "State the underlying cause_FINAL_on the lowest used line"
 PREGNANCY_CONTRIBUTED = "AJAraEcfH63"   # "Did the pregnancy contribute to the death?"
 WAS_PREGNANT = "zcn7acUB6x1"       # "For women, was the deceased pregnant?"
+STILLBORN = "ivnHp4M4hFF"          # "Stillborn?"
 
 TOP_N = 5
 MAX_EVENTS = 2000
@@ -145,7 +146,7 @@ def _events(start: date, end: date, org_unit: str, session=None) -> list:
         picked = {}
         for dv in ev.get("dataValues") or []:
             de = dv.get("dataElement")
-            if de in (UNDERLYING_CAUSE, PREGNANCY_CONTRIBUTED, WAS_PREGNANT):
+            if de in (UNDERLYING_CAUSE, PREGNANCY_CONTRIBUTED, WAS_PREGNANT, STILLBORN):
                 picked[de] = dv.get("value")
         kept.append(picked)
     return kept
@@ -224,16 +225,25 @@ def summary(period: str, weeks_back: int = 12, scope: str = "facility",
     window_start = start - timedelta(weeks=max(0, weeks_back))
     events = _events(window_start, end + timedelta(days=1), ou["id"], session=session)
 
-    all_cause, maternal = {}, {}
-    certified = 0
+    all_cause, mpdsr = {}, {}
+    certified = maternal_n = perinatal_n = 0
     for ev in events:
         cause = tidy_cause(ev.get(UNDERLYING_CAUSE))
         if not cause:
             continue
         certified += 1
         all_cause[cause] = all_cause.get(cause, 0) + 1
-        if _is_yes(ev.get(PREGNANCY_CONTRIBUTED)):
-            maternal[cause] = maternal.get(cause, 0) + 1
+        # MPDSR is maternal AND perinatal, so both halves are counted: a death
+        # the pregnancy contributed to, and a stillbirth. Reading only the
+        # first would put a heading over a chart that answered half of it.
+        is_maternal = _is_yes(ev.get(PREGNANCY_CONTRIBUTED))
+        is_perinatal = _is_yes(ev.get(STILLBORN))
+        if is_maternal:
+            maternal_n += 1
+        if is_perinatal:
+            perinatal_n += 1
+        if is_maternal or is_perinatal:
+            mpdsr[cause] = mpdsr.get(cause, 0) + 1
 
     denom = _denominator(period, ou["id"], session=session)
     seen = denom.get("seen")
@@ -257,9 +267,14 @@ def summary(period: str, weeks_back: int = 12, scope: str = "facility",
         "ratePerThousand": rate,
         "denominatorSource": denom.get("source"),
         "allCause": _top(all_cause),
-        "maternal": _top(maternal),
+        "mpdsr": _top(mpdsr),
         "certifiedInWindow": certified,
-        "maternalInWindow": sum(maternal.values()),
+        "mpdsrInWindow": sum(mpdsr.values()),
+        # The split, because "MPDSR" over one bar chart says nothing about
+        # which half the bars came from, and at this hospital it is mostly the
+        # perinatal half.
+        "maternalInWindow": maternal_n,
+        "perinatalInWindow": perinatal_n,
         # Said plainly: these bars are a count of certificates, and a hospital
         # that certifies half its deaths shows half its causes.
         "eventsRead": len(events),

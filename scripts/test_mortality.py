@@ -57,7 +57,7 @@ IDENTIFIERS = {
 }
 
 
-def event(cause, contributed=None, pregnant=None):
+def event(cause, contributed=None, pregnant=None, stillborn=None):
     values = [{"dataElement": k, "value": v} for k, v in IDENTIFIERS.items()]
     if cause is not None:
         values.append({"dataElement": mortality.UNDERLYING_CAUSE, "value": cause})
@@ -65,6 +65,8 @@ def event(cause, contributed=None, pregnant=None):
         values.append({"dataElement": mortality.PREGNANCY_CONTRIBUTED, "value": contributed})
     if pregnant is not None:
         values.append({"dataElement": mortality.WAS_PREGNANT, "value": pregnant})
+    if stillborn is not None:
+        values.append({"dataElement": mortality.STILLBORN, "value": stillborn})
     return {"event": "ev123", "orgUnit": FACILITY, "occurredAt": "2026-08-20",
             "dataValues": values}
 
@@ -83,6 +85,10 @@ EVENTS = (
     + [event("PRE-ECLAMPSIA, UNSPECIFIED", contributed="Yes")]
     + [event("APH", contributed="yes")]
     + [event("SEVERE ANAEMIA", pregnant="Yes")]        # pregnant, but not a contributor
+    # The perinatal half of MPDSR: stillbirths, which the certificate flags
+    # separately from the maternal question.
+    + [event("BIRTH ASPHYXIA, UNSPECIFIED", stillborn="Yes") for _ in range(3)]
+    + [event("UNKNOWN", stillborn="Yes") for _ in range(2)]
     + [event(None), event("   ")]                       # certified with no cause
 )
 
@@ -159,22 +165,31 @@ print("\n-- the five leading causes --")
 data = summary()
 check("five bars, not six", len(data["allCause"]), 5)
 check("ordered by deaths",
-      [r["deaths"] for r in data["allCause"]], [11, 8, 8, 6, 3])
+      [r["deaths"] for r in data["allCause"]], [14, 8, 8, 6, 3])
 check("the leading cause", data["allCause"][0],
-      {"cause": "Birth asphyxia", "deaths": 11})
+      {"cause": "Birth asphyxia", "deaths": 14})
 check("a tie is broken by name, so the order never wobbles between reloads",
       [r["cause"] for r in data["allCause"][1:3]],
       ["Essential hypertension", "Unspecified multiple injuries"])
-check("the count is of certificates that carry a cause", data["certifiedInWindow"], 46)
-check("...out of every certificate read", data["eventsRead"], 48)
+check("the count is of certificates that carry a cause", data["certifiedInWindow"], 51)
+check("...out of every certificate read", data["eventsRead"], 53)
 
-print("\n-- and the maternal ones --")
-check("only deaths a pregnancy contributed to", data["maternalInWindow"], 7)
-check("...led by anaemia", data["maternal"][0], {"cause": "Anaemias or other erythrocyte disorders", "deaths": 3})
+print("\n-- and the MPDSR ones, which are both halves --")
+check("deaths a pregnancy contributed to", data["maternalInWindow"], 7)
+check("...and stillbirths", data["perinatalInWindow"], 5)
+check("...counted together, because that is what MPDSR means",
+      data["mpdsrInWindow"], 12)
+check("both halves are in the same ranking, tied at three and ordered by name",
+      [(r["cause"], r["deaths"]) for r in data["mpdsr"][:2]],
+      [("Anaemias or other erythrocyte disorders", 3), ("Birth asphyxia", 3)])
+check("the maternal causes are in the same group",
+      any(r["cause"] == "Anaemias or other erythrocyte disorders" for r in data["mpdsr"]), True)
 check("...case-insensitively, because the form stores what was typed",
-      any(r["cause"] == "APH" for r in data["maternal"]), True)
-check("a pregnancy that did not contribute is not a maternal death",
-      any(r["cause"] == "Severe anaemia" for r in data["maternal"]), False)
+      any(r["cause"] == "APH" for r in data["mpdsr"]), True)
+check("a pregnancy that did not contribute is neither",
+      any(r["cause"] == "Severe anaemia" for r in data["mpdsr"]), False)
+check("a recorded 'unknown' is shown rather than quietly dropped",
+      any(r["cause"] == "Unknown" for r in data["mpdsr"]), True)
 
 print("\n-- the rate, and what it is made of --")
 check("patients seen", data["seen"], SEEN)
@@ -185,6 +200,7 @@ check("the period asked for is the period reported", data["period"], "2026W34")
 check("...and the window behind the bars is stated", data["window"]["weeks"], 13)
 no_deaths = mortality.summary(period="2026W34", session=Session(events=[]))
 check("no certificates means no bars, not a zero", no_deaths["allCause"], [])
+check("...on both groups", no_deaths["mpdsr"], [])
 check("...and the rate still stands, because it does not come from certificates",
       no_deaths["ratePerThousand"], round(2 / 2103 * 1000, 2))
 
@@ -207,6 +223,15 @@ check("...and only the data values are requested, never the names beside them",
       s.event_params["fields"], "dataValues[dataElement,value]")
 check("the window ends with the period asked about",
       s.event_params["occurredBefore"] >= "2026-08-24", True)
+
+print("\n-- the card names the two groups as the programme does --")
+with open(os.path.join(HERE, "..", "app", "mortality.js")) as fh:
+    card = fh.read()
+check("all-cause", "All Cause Mortality" in card, True)
+check("MPDSR, spelled out", "Maternal and Perinatal Death Surveillance and Response" in card, True)
+check("...and the split is shown beside it, so the heading is not a claim the "
+      "bars cannot support",
+      "maternal, " in card and "perinatal" in card, True)
 
 print("\n-- when DHIS2 says no --")
 try:

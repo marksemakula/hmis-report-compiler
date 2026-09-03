@@ -19,7 +19,7 @@ import { IconAlert } from './icons';
  * headed in words, so colour is never the only thing carrying the distinction.
  */
 const ALL_CAUSE = '#066fd1';
-const MATERNAL = '#0ca678';
+const MPDSR = '#0ca678';
 
 const nf = (n) => (n === null || n === undefined ? null : Number(n).toLocaleString('en-GB'));
 
@@ -115,7 +115,7 @@ export default function Mortality({ scope = 'facility' }) {
   const max = Math.max(
     1,
     ...(data.allCause || []).map((r) => r.deaths),
-    ...(data.maternal || []).map((r) => r.deaths),
+    ...(data.mpdsr || []).map((r) => r.deaths),
   );
 
   return (
@@ -147,7 +147,7 @@ export default function Mortality({ scope = 'facility' }) {
         <div style={{ borderTop: '1px solid var(--tblr-border-color)', paddingTop: '.5rem' }}>
           <div className="d-flex items-center gap-2" style={{ marginBottom: '.35rem' }}>
             <span style={{ width: 10, height: 10, borderRadius: 2, background: ALL_CAUSE, flex: 'none' }} />
-            <span className="fw-medium" style={{ fontSize: '.75rem' }}>Leading causes, all deaths</span>
+            <span className="fw-medium" style={{ fontSize: '.75rem' }}>All Cause Mortality</span>
             <span className="text-secondary ms-auto" style={{ fontSize: '.6875rem' }}>
               {data.certifiedInWindow} certified in {data.window?.weeks} weeks
             </span>
@@ -158,14 +158,19 @@ export default function Mortality({ scope = 'facility' }) {
 
         <div style={{ marginTop: '.6rem', borderTop: '1px solid var(--tblr-border-color)', paddingTop: '.5rem' }}>
           <div className="d-flex items-center gap-2" style={{ marginBottom: '.35rem' }}>
-            <span style={{ width: 10, height: 10, borderRadius: 2, background: MATERNAL, flex: 'none' }} />
-            <span className="fw-medium" style={{ fontSize: '.75rem' }}>Maternal, pregnancy contributed</span>
-            <span className="text-secondary ms-auto" style={{ fontSize: '.6875rem' }}>
-              {data.maternalInWindow} of {data.certifiedInWindow}
+            <span style={{ width: 10, height: 10, borderRadius: 2, background: MPDSR, flex: 'none' }} />
+            {/* The full name, and under it the split: "MPDSR" over a single set
+                of bars does not say which half they came from, and here it is
+                mostly the perinatal half. */}
+            <span className="fw-medium" style={{ fontSize: '.75rem', minWidth: 0 }}>
+              Maternal and Perinatal Death Surveillance and Response
+            </span>
+            <span className="text-secondary ms-auto" style={{ fontSize: '.6875rem', flex: 'none' }}>
+              {data.maternalInWindow} maternal, {data.perinatalInWindow} perinatal
             </span>
           </div>
-          <Bars rows={data.maternal} colour={MATERNAL} max={max}
-            empty="No certificate in this window records a death to which pregnancy contributed." />
+          <Bars rows={data.mpdsr} colour={MPDSR} max={max}
+            empty="No certificate in this window records a maternal or perinatal death." />
         </div>
 
         {/* Where the numbers come from, in one line, because a reader who does
@@ -173,9 +178,9 @@ export default function Mortality({ scope = 'facility' }) {
             register will read the bars as the whole of the hospital's deaths. */}
         <div className="text-secondary" style={{ fontSize: '.6875rem', marginTop: '.6rem' }}>
           Causes from the medical certificates of cause of death (HMIS 100); the rate from
-          {' '}{data.denominatorSource}. The maternal and perinatal death review forms carry
-          no coded cause at this hospital, so the maternal bars are drawn from the
-          certificates that record a contributing pregnancy.
+          {' '}{data.denominatorSource}. The MPDSR review forms carry no coded cause at this
+          hospital, so those bars are drawn from the certificates themselves: deaths a
+          pregnancy contributed to, and stillbirths.
         </div>
       </div>
     </div>
