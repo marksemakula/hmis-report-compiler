@@ -749,6 +749,15 @@ def _percentile(values: list, p: float):
     return float(ordered[low]) * (1 - frac) + float(ordered[high]) * frac
 
 
+def _median_int(values: list) -> int:
+    """The middle value, rounded down. Written out for the same reason as
+    _percentile: no numpy in a Vercel function, and it is two lines."""
+    if not values:
+        return 0
+    ordered = sorted(values)
+    return int(ordered[len(ordered) // 2])
+
+
 def iso_weeks_in_year(year: int) -> int:
     """52 or 53. 28 December is always in the last ISO week of its year."""
     return date(year, 12, 28).isocalendar()[1]
@@ -934,8 +943,15 @@ def malaria_channel(element: str = "", scope: str = "facility", year: int = None
         # Said plainly rather than hidden: a channel built on two years is not
         # the method the guidelines describe, and the reader must know that
         # before acting on a threshold drawn from it.
-        "baselineYearsUsed": max(covered) if covered else 0,
-        "baselineBelowGuidance": (max(covered) if covered else 0) < MIN_BASELINE_YEARS,
+        #
+        # The TYPICAL week, not the best one. This reported the maximum, and at
+        # Jinja the maximum is 5 while the median week is built on 3 and some
+        # weeks on 1: one well-covered week in the year was enough to silence
+        # the warning for all fifty-three. A reader was told "5 previous years"
+        # over a chart whose limits mostly came from three.
+        "baselineYearsUsed": _median_int(covered),
+        "baselineYearsBest": max(covered) if covered else 0,
+        "baselineBelowGuidance": _median_int(covered) < MIN_BASELINE_YEARS,
     }
 
 

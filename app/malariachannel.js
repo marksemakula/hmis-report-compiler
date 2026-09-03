@@ -12,12 +12,6 @@ import { IconAlert } from './icons';
  * mean-plus-two-standard-deviations method, which assumes a normal
  * distribution weekly case counts do not have.
  *
- * On colour: this is one of the few charts where green-amber-red is right.
- * Elsewhere in this dashboard that ramp is avoided because green and red
- * separate by only ~8 in deuteranopia. Here severity is also carried by
- * vertical position - the bands are stacked in a fixed order, low to high -
- * and by the labels on them, so colour is the third channel rather than the
- * only one. The line that matters is drawn in ink, not in a band colour.
  */
 
 /* The channel has two walls, and both are now drawn.
@@ -34,17 +28,30 @@ import { IconAlert } from './icons';
  * seeing, and at this hospital it has more often meant a return filed short
  * than malaria receding.
  */
-const BANDS = [
-  { key: 'low', label: 'Below the expected channel', fill: 'rgba(4,32,69,.06)' },
-  { key: 'normal', label: 'Expected (25th-75th percentile)', fill: 'rgba(47,179,68,.16)' },
-  { key: 'alert', label: 'Alert (>75th percentile)', fill: 'rgba(245,159,0,.20)' },
-  { key: 'epidemic', label: 'Epidemic (>85th percentile)', fill: 'rgba(214,57,57,.16)' },
-];
-
-const LIMIT_LINES = [
-  { key: 'alert', label: 'Upper limit (75th percentile)', stroke: '#f59f00', dash: null },
-  { key: 'low', label: 'Lower limit (25th percentile)', stroke: '#4263eb', dash: '6 3' },
-];
+/* Ink, two thresholds, one band. That is the whole palette.
+ *
+ * What it replaced: four filled zones stacked to the top of the plot. Because
+ * this year's weekly counts run four to six times the thresholds, the epidemic
+ * fill covered about seventy per cent of the canvas and the channel itself was
+ * squeezed into a strip at the bottom. A reader saw a red page, which says
+ * nothing, and could not read the limits at all.
+ *
+ * Now only the expected range is filled, in a neutral grey that competes with
+ * nothing; above it, two lines and white space. The line that matters is drawn
+ * in ink.
+ *
+ * On the amber: measured against this surface it is 2.08:1, below the 3:1 a
+ * mark should clear, and darkening it collides with the red - a darker orange
+ * measures 13.7 from #d63939 in OKLab, under the 15 at which full-colour
+ * readers can still tell two marks apart. It keeps its hue and earns the
+ * contrast back the way the guidance allows: a visible label on the line
+ * itself, plus every figure in the tooltip.
+ */
+const INK = '#0b0b0b';
+const MUTED = '#898781';
+const BAND_FILL = 'rgba(82,81,78,.13)';
+const ALERT_COLOUR = '#f59f00';
+const EPIDEMIC_COLOUR = '#d63939';
 
 const STATUS = {
   normal: { badge: 'ok', word: 'Within the expected channel' },
@@ -71,8 +78,9 @@ function Channel({ data }) {
   const box = useRef(null);
   const W = useWidth(box);
 
-  const H = 300;
-  const padL = 46, padR = 12, padT = 12, padB = 30;
+  const H = 320;
+  // padR holds the labels that name each line at its right-hand end.
+  const padL = 52, padR = 104, padT = 20, padB = 40;
   const plotW = Math.max(80, W - padL - padR);
   const plotH = H - padT - padB;
 
@@ -125,6 +133,38 @@ function Channel({ data }) {
     return d;
   };
 
+  /* The last week each series has a value for, which is where its label goes. */
+  const lastValue = (key) => {
+    for (let i = weeks.length - 1; i >= 0; i -= 1) {
+      const v = weeks[i][key];
+      if (v !== null && v !== undefined) return v;
+    }
+    return null;
+  };
+
+  /* Push the labels apart until none overlaps, then lift the stack back inside
+     the plot if it has run past the bottom. Four labels, so this is exact. */
+  const labels = useMemo(() => {
+    const wanted = [
+      { text: 'Epidemic', colour: EPIDEMIC_COLOUR, dash: null, value: lastValue('epidemic') },
+      { text: 'Alert', colour: ALERT_COLOUR, dash: null, value: lastValue('alert') },
+      { text: 'Median', colour: MUTED, dash: '5 3', value: lastValue('median') },
+      { text: 'Lower limit', colour: MUTED, dash: '2 3', value: lastValue('low') },
+    ].filter((l) => l.value !== null).map((l) => ({ ...l, y: yOf(l.value) }));
+    const out = wanted.sort((a, b) => a.y - b.y);
+    for (let i = 1; i < out.length; i += 1) {
+      if (out[i].y - out[i - 1].y < 15) out[i].y = out[i - 1].y + 15;
+    }
+    const overflow = out.length ? out[out.length - 1].y - (padT + plotH) : 0;
+    if (overflow > 0) out.forEach((o) => { o.y -= overflow; });
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [weeks, top, plotH]);
+
+  let latest = -1;
+  weeks.forEach((w, i) => { if (w.current !== null && w.current !== undefined) latest = i; });
+  const reportedWeeks = weeks.filter((w) => w.current !== null && w.current !== undefined).length;
+
   const active = hover === null ? null : weeks[hover];
   const st = STATUS[data.status] || STATUS.unknown;
 
@@ -133,48 +173,74 @@ function Channel({ data }) {
       <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H}
         style={{ width: '100%', height: `${H}px`, display: 'block' }} role="img"
         aria-label={`Weekly malaria cases for ${data.orgUnit?.name} in ${data.year}, against percentile bands from ${data.baselineYears?.join(', ')}`}>
+        <text x={padL - 44} y="12" fontSize="11" fill={MUTED}>Cases</text>
         {ticks.map((v) => (
           <g key={v}>
-            <line x1={padL} x2={W - padR} y1={yOf(v)} y2={yOf(v)} stroke="#e5e7eb" strokeWidth="1" />
-            <text x={padL - 8} y={yOf(v) + 4} textAnchor="end" fontSize="11" fill="#6b7280">
+            <line x1={padL} x2={padL + plotW} y1={yOf(v)} y2={yOf(v)} stroke="#e1e0d9" strokeWidth="1" />
+            <text x={padL - 8} y={yOf(v) + 4} textAnchor="end" fontSize="11" fill={MUTED}>
               {v >= 1000 ? `${Math.round(v / 1000)}k` : Math.round(v)}
             </text>
           </g>
         ))}
 
-        <path d={areaPath(() => 0, (w) => w.low)} fill={BANDS[0].fill} />
-        <path d={areaPath((w) => w.low, (w) => w.alert)} fill={BANDS[1].fill} />
-        <path d={areaPath((w) => w.alert, (w) => w.epidemic)} fill={BANDS[2].fill} />
-        <path d={areaPath((w) => w.epidemic, () => top)} fill={BANDS[3].fill} />
+        {/* One fill: the expected range. Everything above it is white space
+            with two lines across it, which is what makes the lines readable. */}
+        <path d={areaPath((w) => w.low, (w) => w.alert)} fill={BAND_FILL} />
 
-        <path d={linePath((w) => w.median)} fill="none" stroke="#6b7280"
-          strokeWidth="1.5" strokeDasharray="4 3" />
-        {/* The two walls of the channel, drawn rather than left as the edge of
-            a shaded area: a limit a reader can point at is the thing this chart
-            is consulted for, and a band edge is not pointable. */}
-        <path d={linePath((w) => w.low)} fill="none" stroke="#4263eb"
-          strokeWidth="1.5" strokeDasharray="6 3" />
-        <path d={linePath((w) => w.alert)} fill="none" stroke="#f59f00" strokeWidth="1.75" />
-        <path d={linePath((w) => w.epidemic)} fill="none" stroke="#d63939" strokeWidth="1.5" />
-        <path d={linePath((w) => w.current)} fill="none" stroke="#1f2937"
+        <path d={linePath((w) => w.low)} fill="none" stroke={MUTED}
+          strokeWidth="1.25" strokeDasharray="2 3" />
+        <path d={linePath((w) => w.median)} fill="none" stroke={MUTED}
+          strokeWidth="1.25" strokeDasharray="5 3" />
+        <path d={linePath((w) => w.alert)} fill="none" stroke={ALERT_COLOUR} strokeWidth="2" />
+        <path d={linePath((w) => w.epidemic)} fill="none" stroke={EPIDEMIC_COLOUR} strokeWidth="2" />
+        <path d={linePath((w) => w.current)} fill="none" stroke={INK}
           strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+
+        {/* Each line named where it ends, nudged apart so two never overlap.
+            Four labels here are four fewer legend entries to match by colour,
+            and they are what makes the amber legible at its contrast. */}
+        {labels.map((l) => (
+          <g key={l.text}>
+            <line x1={padL + plotW + 4} x2={padL + plotW + 16} y1={l.y} y2={l.y}
+              stroke={l.colour} strokeWidth="2"
+              strokeDasharray={l.dash || undefined} />
+            <text x={padL + plotW + 20} y={l.y + 4} fontSize="11" fill="#52514e">{l.text}</text>
+          </g>
+        ))}
 
         {weeks.map((w, i) => (w.current === null || w.current === undefined ? null : (
           <circle key={w.week} cx={xOf(i)} cy={yOf(w.current)} r={hover === i ? 4.5 : 3}
-            fill={w.epidemic !== null && w.current > w.epidemic ? '#d63939' : '#1f2937'}
-            stroke="#fff" strokeWidth="1.5" />
+            fill={INK} stroke="#fcfcfb" strokeWidth="2" />
         )))}
+
+        {/* The one point worth labelling: where this hospital stands now. A
+            value beside every dot would be chaos and goes unread. */}
+        {latest >= 0 && (
+          <g>
+            <circle cx={xOf(latest)} cy={yOf(weeks[latest].current)} r="5"
+              fill={data.status === 'epidemic' ? EPIDEMIC_COLOUR : INK}
+              stroke="#fcfcfb" strokeWidth="2" />
+            <text x={xOf(latest) + (xOf(latest) > padL + plotW - 130 ? -10 : 10)}
+              y={yOf(weeks[latest].current) - 10} fontSize="11" fontWeight="600" fill={INK}
+              textAnchor={xOf(latest) > padL + plotW - 130 ? 'end' : 'start'}>
+              Week {weeks[latest].week}: {nf(weeks[latest].current)}
+            </text>
+          </g>
+        )}
 
         {weeks.map((w, i) => (
           <g key={`x${w.week}`}>
             {(w.week === 1 || w.week % 4 === 0) && (
-              <text x={xOf(i)} y={H - 10} textAnchor="middle" fontSize="11" fill="#6b7280">{w.week}</text>
+              <text x={xOf(i)} y={H - 22} textAnchor="middle" fontSize="11" fill={MUTED}>{w.week}</text>
             )}
             <rect x={xOf(i) - plotW / Math.max(weeks.length - 1, 1) / 2} y={padT}
               width={plotW / Math.max(weeks.length - 1, 1)} height={plotH} fill="transparent"
               onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)} />
           </g>
         ))}
+        <text x={padL + plotW / 2} y={H - 5} textAnchor="middle" fontSize="11" fill={MUTED}>
+          ISO week
+        </text>
       </svg>
 
       {active && (() => {
@@ -218,27 +284,23 @@ function Channel({ data }) {
       })()}
 
       <div className="d-flex gap-4 items-center flex-wrap" style={{ marginTop: '.75rem', fontSize: '.75rem' }}>
-        {BANDS.map((b) => (
-          <span key={b.key} className="d-flex items-center gap-2">
-            <span style={{ width: 12, height: 12, borderRadius: 3, background: b.fill,
-              boxShadow: 'inset 0 0 0 1px rgba(4,32,69,.12)', flex: 'none' }} />
-            <span className="text-secondary">{b.label}</span>
-          </span>
-        ))}
-        {LIMIT_LINES.map((l) => (
-          <span key={l.key} className="d-flex items-center gap-2">
-            <span style={{ width: 14, height: 0, flex: 'none',
-              borderTop: `2px ${l.dash ? 'dashed' : 'solid'} ${l.stroke}` }} />
-            <span className="text-secondary">{l.label}</span>
-          </span>
-        ))}
+        {/* Only the two marks the plot cannot name at their own right-hand end.
+            Nine legend entries was itself the problem: a row of pale swatches
+            that had to be matched back to four pale fills. */}
         <span className="d-flex items-center gap-2">
-          <span style={{ width: 14, height: 2, background: '#1f2937', flex: 'none' }} />
-          <span className="text-secondary">{data.year} cases</span>
+          <span style={{ width: 16, height: 2, background: INK, flex: 'none' }} />
+          <span className="text-secondary">
+            {data.year} cases{reportedWeeks ? `, ${reportedWeeks} weeks reported` : ''}
+          </span>
         </span>
         <span className="d-flex items-center gap-2">
-          <span style={{ width: 14, height: 0, borderTop: '1.5px dashed #6b7280', flex: 'none' }} />
-          <span className="text-secondary">Median of {data.baselineYears?.length} previous years</span>
+          <span style={{ width: 16, height: 12, background: BAND_FILL, flex: 'none',
+            boxShadow: 'inset 0 0 0 1px rgba(4,32,69,.12)' }} />
+          <span className="text-secondary">
+            Expected range: the {data.lowPercentile ?? 25}th to {data.alertPercentile ?? 75}th
+            percentile of the same week in {data.baselineYears?.[0]} to
+            {' '}{data.baselineYears?.[data.baselineYears.length - 1]}
+          </span>
         </span>
         <span className={`badge ${st.badge} ms-auto`}>{st.word}</span>
       </div>
@@ -411,9 +473,13 @@ export default function MalariaChannel({ scope: initialScope = 'facility' }) {
           rather than presenting a threshold it cannot support. */}
       {data.baselineBelowGuidance && (
         <div className="alert warn">
-          These thresholds come from {data.baselineYearsUsed} year
-          {data.baselineYearsUsed === 1 ? '' : 's'} of history. Uganda&rsquo;s guidance asks for
-          five to ten; treat the bands as indicative until more history is available.
+          Most weeks here are built on {data.baselineYearsUsed} previous year
+          {data.baselineYearsUsed === 1 ? '' : 's'}, not
+          {' '}{data.baselineYears?.length}: the earlier years are incomplete in this
+          register{data.baselineYearsBest > data.baselineYearsUsed
+            ? `, and only the best-covered week reaches ${data.baselineYearsBest}`
+            : ''}. Uganda&rsquo;s guidance asks for five to ten, so treat the limits as
+          indicative until more history is available.
         </div>
       )}
 

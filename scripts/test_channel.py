@@ -199,8 +199,17 @@ with open(os.path.join(HERE, "..", "app", "malariachannel.js")) as fh:
 low_entry = component[component.index("  low: {"):component.index("\n", component.index("  low: {"))]
 check("a week below the floor is styled as muted, not as a fault",
       "'muted'" in low_entry and "'bad'" not in low_entry, True)
-check("...and the component reads the same floor the server sends",
-      "Lower limit (25th percentile)" in component, True)
+check("the typical week's coverage is reported, not the best week's",
+      analytics._median_int([1, 2, 3, 3, 5]), 3)
+check("...the floor is drawn and named on the chart itself",
+      "'Lower limit'" in component, True)
+check("...and the legend states the percentiles the server sent, never its own",
+      "data.lowPercentile" in component and "data.alertPercentile" in component, True)
+# The flood this replaced: four filled zones, the top one stacked to the top of
+# the plot, which covered most of the canvas in red.
+check("nothing is filled to the top of the plot any more",
+      "areaPath((w) => w.epidemic, () => top)" in component, False)
+check("exactly one band is filled", component.count("fill={BAND_FILL}"), 1)
 
 print("\n-- which organisation unit was charted --")
 check("the default is this hospital", data["orgUnit"]["id"], FACILITY)
