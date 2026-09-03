@@ -21,7 +21,7 @@ from _lib.surveillance import (
     SURV_COLUMNS, check_consistency, compile_033b, describe_week,
     parse_week_period, template_csv, validate_surveillance_rows,
 )
-from _lib import coverage, dhis2, extract_scripts, forms, periods
+from _lib import consistency, coverage, dhis2, extract_scripts, forms, periods
 
 EXPECTED_COLUMNS = {"OPD": OPD_COLUMNS, "IPD": IPD_COLUMNS, "SURV": SURV_COLUMNS}
 
@@ -171,7 +171,7 @@ def upload(body: UploadBody, user: dict = Depends(current_user)):
     # counts by diagnosis, age band, sex and visit type. Recognised by its
     # columns rather than its name, so a renamed file still works.
     source = "UPLOAD"
-    context, consistency = {}, []
+    context, surv_findings = {}, []
     # Every branch below can raise RuntimeError, and those messages are written
     # FOR the person reading them: "the 033B element list is empty, set
     # DHIS2_USERNAME and run Refresh metadata". Uncaught, FastAPI turned each of
@@ -183,7 +183,7 @@ def upload(body: UploadBody, user: dict = Depends(current_user)):
             # Arithmetic the form implies but cannot enforce. Surfaced at
             # upload, while the figures can still be questioned, rather than
             # after they have been submitted to the national instance.
-            consistency = check_consistency(clean, context)
+            surv_findings = check_consistency(clean, context)
         elif extract_scripts.looks_like_strata(rows[0].keys() if rows else None):
             try:
                 strata = agentlib.validate_strata([
@@ -228,7 +228,7 @@ def upload(body: UploadBody, user: dict = Depends(current_user)):
         # Extract metadata (the period actually covered, tests ordered against
         # tests resulted) and the consistency findings drawn from it.
         "context": context,
-        "consistency": consistency,
+        "consistency": surv_findings,
     }
 
 
@@ -267,6 +267,11 @@ def compile_report(body: CompileBody, user: dict = Depends(current_user)):
             "For the weekly surveillance report, remember that a blank cell means "
             "'not reported' and is skipped - enter 0 where the true count is zero.")
 
+    # Arithmetic the form implies but cannot enforce. 105:01's malaria chain is
+    # five elements describing one pathway, each a subset of the last, and two
+    # of the five have been blank at this facility every year since 2020.
+    findings = consistency.check_opd(values) if imp["report_type"] == "OPD" else []
+
     m = mapping()
     with db.get_conn() as conn:
         with conn.cursor() as cur:
@@ -282,7 +287,8 @@ def compile_report(body: CompileBody, user: dict = Depends(current_user)):
         "report_id": report_id, "type": imp["report_type"], "period": imp["period"],
         "data_values": len(values), "unmapped_codes": len(unmapped),
     })
-    return {"report_id": report_id, "data_values": len(values), "unmapped": unmapped}
+    return {"report_id": report_id, "data_values": len(values),
+            "unmapped": unmapped, "consistency": findings}
 
 
 # ---------------- reports ----------------

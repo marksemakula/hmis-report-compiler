@@ -373,6 +373,15 @@ export default function Workflow() {
 
       {step === 2 && report && (
         <div className="card">
+          {compiled?.consistency?.length > 0 && (
+            <div style={{ marginBottom: 14 }}>
+              {compiled.consistency.map((c, i) => (
+                <div key={i} className={`alert ${c.severity === 'error' ? 'error' : 'warn'}`}>
+                  <b>{c.severity === 'error' ? 'Cannot be right' : 'Worth checking'}</b> - {c.message}
+                </div>
+              ))}
+            </div>
+          )}
           <h2>Compiled report preview - {REPORTS[reportType].label} · {periodLabel}</h2>
           <p style={{ color: 'var(--muted)', marginTop: 0 }}>Facility: {report.facility_name} · {report.compiled_data.length} data values</p>
           {compiled.unmapped?.length > 0 && (
