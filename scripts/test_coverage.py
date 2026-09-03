@@ -292,3 +292,59 @@ check("...including the unspecified form",
       _classify_name("MALARIA, UNSPECIFIED"), "EP01c")
 check("no HIV-named code survives in the table as a malaria mapping",
       [k for k, v in dmap.icd11_map().items() if v == "EP01c" and k.startswith("1C6")], [])
+
+print("\nA partial import must explain itself, not just report a shortfall")
+# Week 35 of 2026 compiles eleven 033B values, five of which are genuine
+# measured zeros: MA02, MA03, GP02, GP04, GP05. DHIS2 keeps six. Without an
+# explanation the app reports "6 of 11" and looks broken when it is correct.
+import types  # noqa: E402
+
+
+def _fake_submit(imported, sent, zeros):
+    """Drive dhis2.submit's response handling without a network."""
+    payload = {"dataValues": [{"dataElement": f"de{i}", "categoryOptionCombo": "c",
+                               "value": "0" if i < zeros else str(i + 1)}
+                              for i in range(sent)]}
+
+    class R:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"status": "SUCCESS",
+                    "importCount": {"imported": imported, "updated": 0, "ignored": 0, "deleted": 0},
+                    "conflicts": []}
+        text = ""
+
+    sess = types.SimpleNamespace(post=lambda *a, **k: R())
+    dhis2._session = lambda: sess
+    dhis2.resolve_attribute_option_combo = lambda *a, **k: None
+    return dhis2.submit(payload)
+
+
+res = _fake_submit(imported=6, sent=11, zeros=5)
+check("a shortfall is reported honestly as accepted", res["accepted"], True)
+check("it says how many of how many were stored",
+      "stored 6 of the 11" in res["description"], True)
+check("it names zeros as the reason", "5 of them were zeros" in res["description"], True)
+check("it explains that this is not a fault",
+      "absent cell IS the zero" in res["description"], True)
+check("the counts are carried for the UI",
+      (res["valuesSent"], res["zerosSent"]), (11, 5))
+
+full = _fake_submit(imported=11, sent=11, zeros=0)
+check("a complete import says nothing extra", full["description"], "")
+# The observed shape for a discarded zero is imported=0 AND ignored=0, which
+# is why this looked like silence: neither branch of the old check fired.
+all_zero = _fake_submit(imported=0, sent=11, zeros=11)
+check("an all-zero push is not accepted", all_zero["accepted"], False)
+check("...but is explained as correct rather than as a failure",
+      "nothing needed to be" in all_zero["description"], True)
+check("...and does not accuse DHIS2 of ignoring anything",
+      "ignored all" in all_zero["description"], False)
+
+nothing = _fake_submit(imported=0, sent=11, zeros=0)
+check("nothing stored with no zeros and no conflicts still explains itself",
+      "stored none of the 11" in nothing["description"], True)
+check("...and says what to check",
+      "data capture rights" in nothing["description"], True)

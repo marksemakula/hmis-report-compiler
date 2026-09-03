@@ -206,17 +206,62 @@ def submit(payload: dict, max_retries: int = 3, dry_run: bool = False):
                 # so success must be judged on the import counts, not the status flag.
                 accepted = summary.get("status") in ("SUCCESS", "OK", "WARNING") and (imported + updated) > 0
                 description = summary.get("description", "")
-                if not accepted and ignored > 0:
+                sent = len(payload.get("dataValues") or [])
+                zeros = sum(1 for v in (payload.get("dataValues") or [])
+                            if str(v.get("value", "")).strip() == "0")
+
+                if not accepted and sent:
                     reasons = "; ".join(f"{c.get('object', '?')}: {c.get('value', '?')}" for c in conflicts[:5])
-                    description = (
-                        f"DHIS2 accepted the request but ignored all {ignored} value(s) - nothing was written. "
-                        f"{('Conflicts: ' + reasons) if reasons else 'No conflict details returned; check that the data set is assigned to the org unit, the period is open, and your user has data capture rights for it.'}"
-                    )
+                    if zeros == sent:
+                        # Every value was a zero. This instance stores none of
+                        # them, so nothing written is the CORRECT outcome rather
+                        # than a failure, and saying "ignored" would be wrong -
+                        # DHIS2 reports neither imported nor ignored for a
+                        # discarded zero, which is how this looked like silence.
+                        description = (
+                            f"All {sent} values were zeros, and this instance does not store "
+                            "them: zeroIsSignificant is false on almost every element, so an "
+                            "absent cell IS the zero. Nothing was written, and nothing needed "
+                            "to be. The figures remain correct on the form and in the preview.")
+                    elif ignored > 0:
+                        description = (
+                            f"DHIS2 accepted the request but ignored all {ignored} value(s) - nothing was written. "
+                            f"{('Conflicts: ' + reasons) if reasons else 'No conflict details returned; check that the data set is assigned to the org unit, the period is open, and your user has data capture rights for it.'}"
+                        )
+                    else:
+                        description = (
+                            f"DHIS2 stored none of the {sent} values sent and reported no "
+                            "conflicts. "
+                            + (f"{zeros} of them were zeros, which this instance discards. " if zeros else "")
+                            + "Check that the data set is assigned to the org unit, the period "
+                              "is open, and your user has data capture rights for it.")
+                # A PARTIAL shortfall needs explaining too, and its commonest
+                # cause is not an error at all. DHIS2 discards a zero for any
+                # element with zeroIsSignificant false, which is 3,247 of the
+                # 3,252 elements across these eight data sets. Week 35 of 2026
+                # compiles eleven 033B values of which five are genuine measured
+                # zeros, so DHIS2 keeps six and the app would otherwise report
+                # a shortfall with no reason given.
+                if accepted and sent and (imported + updated) < sent and not description:
+                    kept = imported + updated
+                    description = f"DHIS2 stored {kept} of the {sent} values sent."
+                    if zeros:
+                        description += (
+                            f" {zeros} of them were zeros, which this instance does not "
+                            "store: zeroIsSignificant is false on almost every element, so "
+                            "an absent cell IS the zero. A measured zero is still correct "
+                            "on the form and in the preview; it simply has nothing to "
+                            "write on the server.")
+                    elif conflicts:
+                        description += " See the conflicts below."
+
                 return {
                     "httpStatus": r.status_code,
                     "status": summary.get("status", "UNKNOWN"),
                     "accepted": accepted,
                     "importCount": counts,
+                    "valuesSent": sent,
+                    "zerosSent": zeros,
                     "conflicts": conflicts,
                     "description": description,
                 }
