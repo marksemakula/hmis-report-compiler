@@ -38,7 +38,15 @@ export default function Preview() {
       .then((body) => {
         if (!body) return;
         setTypes(body.reportTypes);
-        setActive(body.reportTypes[0]?.type || null);
+        /* The dashboard links straight to one report - /preview?report=SURV.
+           Read off window.location rather than useSearchParams, which would
+           oblige the whole route into a Suspense boundary for a single
+           optional parameter. An unrecognised value falls back to the first
+           report, so a stale link opens the page rather than an error. */
+        const wanted = typeof window === 'undefined' ? null
+          : new URLSearchParams(window.location.search).get('report');
+        const chosen = body.reportTypes.find((t) => t.type === wanted);
+        setActive(chosen?.type || body.reportTypes[0]?.type || null);
         const seed = {};
         body.reportTypes.forEach((t) => { seed[t.type] = t.defaultPeriod; });
         setPeriodByType(seed);

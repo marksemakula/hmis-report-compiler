@@ -141,7 +141,9 @@ check('a 52-week year offers 52', weekFns.weeksInYear(2025), 52);
  * render "undefined" under the file input, which is worse than saying nothing.
  */
 console.log('\nThe upload panel says what file each report takes');
-const page = readFileSync(join(here, '..', 'app', 'page.js'), 'utf8');
+/* The compile workflow moved from / to /compile when the dashboard took the
+   landing page. It is the same file; only its directory changed. */
+const page = readFileSync(join(here, '..', 'app', 'compile', 'page.js'), 'utf8');
 const reportsBlock = page.slice(page.indexOf('const REPORTS = {'),
                                 page.indexOf('export default function'));
 for (const key of ['OPD:', 'IPD:', 'SURV:']) {

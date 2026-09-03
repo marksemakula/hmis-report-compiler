@@ -2,6 +2,10 @@
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import {
+  IconDashboard, IconUpload, IconTerminal, IconEye,
+  IconReport, IconHistory, IconSettings, IconLogout,
+} from './icons';
 
 export default function Nav() {
   const pathname = usePathname();
@@ -22,43 +26,71 @@ export default function Nav() {
     router.push('/login');
   };
 
-  // Preview is open to every role, including Viewer, who cannot compile or submit.
+  /* The Dashboard is the landing page for every role. Preview, Reports and the
+     Audit Trail are read-only and open to Viewers as they always were; Compile
+     and the extraction scripts are Data Officer tools, and until the role is
+     known nothing role-gated is drawn, so a Viewer never sees a Compile link
+     flash and disappear. */
   const links = [
-    { href: '/preview', label: 'Preview' },
-    { href: '/reports', label: 'Reports' },
-    { href: '/audit', label: 'Audit Trail' },
+    { href: '/', label: 'Dashboard', Icon: IconDashboard },
+    { href: '/preview', label: 'Preview', Icon: IconEye },
+    { href: '/reports', label: 'Reports', Icon: IconReport },
+    { href: '/audit', label: 'Audit Trail', Icon: IconHistory },
   ];
-  // Extraction scripts are a Data Officer tool; viewers have nothing to run.
-  if (user?.role !== 'viewer') {
-    links.splice(1, 0, { href: '/extract', label: 'Extraction Scripts' });
-    links.unshift({ href: '/', label: 'Compile' });
+  if (user && user.role !== 'viewer') {
+    links.splice(1, 0,
+      { href: '/compile', label: 'Compile', Icon: IconUpload },
+      { href: '/extract', label: 'Extraction Scripts', Icon: IconTerminal });
   }
-  if (user?.role === 'admin') links.push({ href: '/admin', label: 'Administration' });
+  if (user?.role === 'admin') links.push({ href: '/admin', label: 'Administration', Icon: IconSettings });
+
+  const initials = (user?.name || user?.email || '?')
+    .split(/[\s@._-]+/).filter(Boolean).slice(0, 2).map((s) => s[0]).join('').toUpperCase();
 
   return (
-    <header className="topbar">
-      <div className="brand" style={{ display: 'flex', alignItems: 'center', gap: '.7rem' }}>
-        <img src="/logo.png" alt="Jinja Regional Referral Hospital" style={{ height: 40, width: 40, objectFit: 'contain' }} />
-        <span>
-          HMIS Report Compiler
-          <small>Jinja Regional Referral Hospital</small>
-        </span>
-      </div>
-      <nav>
-        {links.map((l) => (
-          <Link key={l.href} href={l.href} className={pathname === l.href ? 'active' : ''}>
-            {l.label}
+    <>
+      <header className="navbar">
+        <div className="container-xl">
+          <Link href="/" className="navbar-brand">
+            <img src="/logo.png" alt="Jinja Regional Referral Hospital" />
+            <span>
+              HMIS Report Compiler
+              <small>Jinja Regional Referral Hospital</small>
+            </span>
           </Link>
-        ))}
-      </nav>
-      {user && (
-        <span className="user">
-          {user.email} · {String(user.role || '').replace('_', ' ')}{' '}
-          <a style={{ color: '#dbe5ee', marginLeft: 8, cursor: 'pointer' }} onClick={logout}>
-            Sign out
-          </a>
-        </span>
-      )}
-    </header>
+          {user && (
+            <div className="navbar-user">
+              <div className="navbar-user-meta">
+                <strong>{user.name || user.email}</strong>
+                <span>{String(user.role || '').replace('_', ' ')}</span>
+              </div>
+              <span className="avatar sm" aria-hidden="true">{initials}</span>
+              <button type="button" className="btn ghost sm" onClick={logout} title="Sign out">
+                <IconLogout size={16} />
+                Sign out
+              </button>
+            </div>
+          )}
+        </div>
+      </header>
+
+      <div className="navbar-secondary">
+        <div className="container-xl">
+          <nav className="navbar-nav" aria-label="Main">
+            {links.map(({ href, label, Icon }) => (
+              <Link
+                key={href}
+                href={href}
+                className={`nav-link ${pathname === href ? 'active' : ''}`}
+                aria-current={pathname === href ? 'page' : undefined}
+              >
+                <Icon size={18} />
+                {label}
+              </Link>
+            ))}
+          </nav>
+        </div>
+      </div>
+    </>
   );
 }

@@ -7,6 +7,7 @@ const BADGE = { DRAFT: 'muted', PUSHED: 'ok', FAILED: 'bad' };
 export default function Reports() {
   const router = useRouter();
   const [reports, setReports] = useState(null);
+  const [shortNames, setShortNames] = useState({});
   const [detail, setDetail] = useState(null);
   const [error, setError] = useState('');
 
@@ -19,6 +20,22 @@ export default function Reports() {
         setReports(body.reports);
       })
       .catch((e) => setError(e.message));
+
+    /* This column used to read `type === 'OPD' ? '105:01 OPD' : '108 IPD'`,
+       which was true when there were two compilers and has been wrong since
+       there were eight registrations: a 033B week and a 105C month both
+       printed as "108 IPD". The names come from the registry rather than a
+       second copy of it, and an unknown code falls back to itself, so a report
+       type added later is never mislabelled - only unadorned. */
+    fetch('/api/py/report-types')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((body) => {
+        if (!body?.reportTypes) return;
+        const map = {};
+        body.reportTypes.forEach((t) => { map[t.type] = `${t.short} ${t.type}`; });
+        setShortNames(map);
+      })
+      .catch(() => {});
   }, [router]);
 
   const open = async (id) => {
@@ -38,7 +55,7 @@ export default function Reports() {
               {reports.map((r) => (
                 <tr key={r.id} style={{ cursor: 'pointer' }} onClick={() => open(r.id)}>
                   <td>{r.id}</td>
-                  <td>{r.type === 'OPD' ? '105:01 OPD' : '108 IPD'}</td>
+                  <td>{shortNames[r.type] || r.type}</td>
                   <td>{r.period}</td>
                   <td>{r.value_count}</td>
                   <td>{r.generated_by}</td>

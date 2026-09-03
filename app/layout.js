@@ -1,8 +1,16 @@
 import './globals.css';
-import { Ubuntu } from 'next/font/google';
+import { Inter } from 'next/font/google';
 import Nav from './nav';
 
-const ubuntu = Ubuntu({ subsets: ['latin'], weight: ['300', '400', '500', '700'], variable: '--font-ubuntu' });
+/* Tabler is set in Inter throughout. The font was Ubuntu; --font-ubuntu is
+   still defined in globals.css, aliased onto this stack, because a handful of
+   inline styles across the pages read it directly. */
+const inter = Inter({
+  subsets: ['latin'],
+  weight: ['400', '500', '600', '700'],
+  variable: '--font-inter',
+  display: 'swap',
+});
 
 export const metadata = {
   title: 'HMIS Report Compiler — Jinja Regional Referral Hospital',
@@ -15,7 +23,7 @@ export const metadata = {
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="en-GB" className={ubuntu.variable}>
+    <html lang="en-GB" className={inter.variable}>
       <body>
         <div className="shell">
           <Nav />

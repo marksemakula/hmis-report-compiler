@@ -1,117 +1,876 @@
+/* ============================================================================
+ * HMIS Report Compiler - design system
+ *
+ * The tokens and component shapes below are Tabler's (https://tabler.io,
+ * v1.4.0, MIT), transcribed by hand rather than pulled in as a dependency.
+ * Tabler is a Bootstrap 5 theme; this application has no Bootstrap and adding
+ * it would mean 200kB of grid and utility classes to style eight pages. So the
+ * palette, the type scale, the radii, the two shadows and the component
+ * anatomy - card, page-header, navbar, stat tile, badge, status dot, datagrid,
+ * empty state - are reproduced directly from Tabler's compiled CSS, and
+ * nothing else is.
+ *
+ * Every class the application already used still exists and still means what
+ * it meant: .card, .btn (with .secondary and .gold), .badge (.ok .warn .bad
+ * .muted), .alert (.error .success .info .warn), .kpis/.kpi/.n/.l,
+ * .steps/.step (.active .done), .grid.cols-2, .topbar, .login-wrap,
+ * .login-card, and bare table/input/select/label. The legacy custom
+ * properties - --navy, --gold, --ink, --muted, --line, --bg, --card, --ok,
+ * --warn, --bad - are kept as aliases onto the new palette, because a dozen
+ * inline styles across the pages read them directly and would otherwise
+ * resolve to nothing.
+ * ========================================================================= */
+
 :root {
-  --navy: #0f2a43;
-  --navy-2: #163a5c;
-  --gold: #b98a2f;
-  --ink: #1c2733;
-  --muted: #5b6b7b;
-  --line: #dde4ea;
-  --bg: #f4f6f8;
-  --card: #ffffff;
-  --ok: #1c7c46;
-  --warn: #a15c00;
-  --bad: #a12d2d;
+  color-scheme: light;
+
+  /* -- Tabler palette ----------------------------------------------------- */
+  --tblr-blue:   #066fd1;
+  --tblr-azure:  #4299e1;
+  --tblr-indigo: #4263eb;
+  --tblr-purple: #ae3ec9;
+  --tblr-pink:   #d6336c;
+  --tblr-red:    #d63939;
+  --tblr-orange: #f76707;
+  --tblr-yellow: #f59f00;
+  --tblr-lime:   #74b816;
+  --tblr-green:  #2fb344;
+  --tblr-teal:   #0ca678;
+  --tblr-cyan:   #17a2b8;
+
+  --tblr-gray-50:  #f9fafb;
+  --tblr-gray-100: #f3f4f6;
+  --tblr-gray-200: #e5e7eb;
+  --tblr-gray-300: #d1d5db;
+  --tblr-gray-400: #9ca3af;
+  --tblr-gray-500: #6b7280;
+  --tblr-gray-600: #4b5563;
+  --tblr-gray-700: #374151;
+  --tblr-gray-800: #1f2937;
+  --tblr-gray-900: #111827;
+
+  --tblr-primary:       #066fd1;
+  --tblr-primary-rgb:   6, 111, 209;
+  --tblr-secondary:     #6b7280;
+  --tblr-success:       #2fb344;
+  --tblr-info:          #4299e1;
+  --tblr-warning:       #f59f00;
+  --tblr-danger:        #d63939;
+
+  --tblr-body-bg:        #f9fafb;
+  --tblr-body-color:     #1f2937;
+  --tblr-body-color-rgb: 31, 41, 55;
+  --tblr-surface:        #ffffff;
+  --tblr-surface-secondary: #f9fafb;
+
+  --tblr-border-color: #e5e7eb;
+  --tblr-border-translucent: rgba(4, 32, 69, .1);
+  --tblr-active-bg: rgba(var(--tblr-primary-rgb), .04);
+
+  /* -- shape -------------------------------------------------------------- */
+  --tblr-border-radius:    6px;
+  --tblr-border-radius-sm: 4px;
+  --tblr-border-radius-lg: 8px;
+  --tblr-border-radius-pill: 100rem;
+
+  --tblr-shadow-card:  0 0 4px rgba(var(--tblr-body-color-rgb), .04);
+  --tblr-shadow-input: 0 1px 1px rgba(var(--tblr-body-color-rgb), .06);
+  --tblr-shadow-dropdown:
+    0 16px 24px 2px rgba(0, 0, 0, .07),
+    0 6px 30px 5px rgba(0, 0, 0, .06),
+    0 8px 10px -5px rgba(0, 0, 0, .1);
+
+  --tblr-page-padding: 1rem;
+  --tblr-page-padding-y: 1.5rem;
+
+  /* -- type --------------------------------------------------------------- */
+  --tblr-font-sans-serif: var(--font-inter), Inter, -apple-system,
+    BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  --tblr-font-monospace: Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  --tblr-font-size-base: .875rem;
+  --tblr-line-height-base: 1.4285714286;
+  --tblr-font-weight-medium: 500;
+  --tblr-font-weight-bold: 600;
+
+  /* -- legacy aliases, still read by inline styles across the pages -------- */
+  --navy:   #1f2937;
+  --navy-2: #066fd1;
+  --gold:   #f59f00;
+  --ink:    #1f2937;
+  --muted:  #6b7280;
+  --line:   #e5e7eb;
+  --bg:     #f9fafb;
+  --card:   #ffffff;
+  --ok:     #2fb344;
+  --warn:   #f59f00;
+  --bad:    #d63939;
+  /* The font was Ubuntu; Tabler is set in Inter. Kept so the one inline
+     reference to it does not resolve to nothing. */
+  --font-ubuntu: var(--tblr-font-sans-serif);
 }
 
-* { box-sizing: border-box; }
+*, *::before, *::after { box-sizing: border-box; }
 
 body {
   margin: 0;
-  background: var(--bg);
-  color: var(--ink);
-  font-family: var(--font-ubuntu), 'Ubuntu', 'Segoe UI', sans-serif;
-  font-size: 15px;
-  line-height: 1.55;
+  background: var(--tblr-body-bg);
+  color: var(--tblr-body-color);
+  font-family: var(--tblr-font-sans-serif);
+  font-size: var(--tblr-font-size-base);
+  font-weight: 400;
+  line-height: var(--tblr-line-height-base);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: 'cv03', 'cv04', 'cv11';
 }
 
-h1, h2, h3 { font-weight: 600; color: var(--navy); margin: 0 0 .5rem; }
-h1 { font-size: 1.45rem; letter-spacing: .01em; }
-h2 { font-size: 1.15rem; }
+h1, h2, h3, h4, h5, h6 {
+  margin: 0 0 .5rem;
+  font-weight: var(--tblr-font-weight-bold);
+  line-height: 1.2;
+  color: inherit;
+}
+h1 { font-size: 1.5rem;  line-height: 2rem; }
+h2 { font-size: 1.25rem; line-height: 1.75rem; }
 h3 { font-size: 1rem; }
+h4 { font-size: .875rem; }
 
-a { color: var(--navy-2); }
+p { margin: 0 0 1rem; }
+p:last-child { margin-bottom: 0; }
 
-.shell { min-height: 100vh; display: flex; flex-direction: column; }
+a { color: var(--tblr-primary); text-decoration: none; }
+a:hover { text-decoration: underline; }
 
+hr {
+  border: 0;
+  border-top: 1px solid var(--tblr-border-translucent);
+  margin: 1rem 0;
+}
+
+code, pre { font-family: var(--tblr-font-monospace); font-size: .8125rem; }
+
+::selection { background: rgba(var(--tblr-primary-rgb), .16); }
+
+:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 .25rem rgba(var(--tblr-primary-rgb), .25);
+  border-radius: var(--tblr-border-radius-sm);
+}
+
+/* ============================================================ page scaffold */
+
+.shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Tabler's container steps up at two breakpoints rather than filling the
+   viewport: 1140px from 1200px wide, 1320px from 1400px. */
+.container-xl {
+  width: 100%;
+  margin: 0 auto;
+  padding-inline: var(--tblr-page-padding);
+}
+main {
+  flex: 1;
+  width: 100%;
+  margin: 0 auto;
+  padding: var(--tblr-page-padding-y) var(--tblr-page-padding);
+}
+@media (min-width: 1200px) { .container-xl, main { max-width: 1140px; } }
+@media (min-width: 1400px) { .container-xl, main { max-width: 1320px; } }
+
+/* Tabler's page header: a small uppercase eyebrow over a bold title, with
+   optional actions pushed to the right on wide screens. */
+.page-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: var(--tblr-page-padding-y);
+}
+.page-header .page-header-actions { margin-left: auto; display: flex; gap: .5rem; flex-wrap: wrap; }
+.page-pretitle,
+.subheader,
+.datagrid-title {
+  font-size: .75rem;
+  font-weight: var(--tblr-font-weight-medium);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  line-height: 1rem;
+  color: var(--tblr-secondary);
+  margin: 0 0 .25rem;
+}
+.page-title {
+  margin: 0;
+  font-size: 1.25rem;
+  line-height: 1.75rem;
+  font-weight: var(--tblr-font-weight-bold);
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+}
+
+/* ==================================================================== navbar */
+
+.navbar {
+  background: var(--tblr-surface);
+  border-bottom: 1px solid var(--tblr-border-translucent);
+}
+.navbar > .container-xl {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  min-height: 3.5rem;
+  padding-block: .5rem;
+}
+
+.navbar-brand {
+  display: flex;
+  align-items: center;
+  gap: .625rem;
+  color: var(--tblr-body-color);
+  text-decoration: none;
+  font-weight: var(--tblr-font-weight-bold);
+  font-size: 1rem;
+  line-height: 1.2;
+}
+.navbar-brand:hover { text-decoration: none; }
+.navbar-brand img { height: 36px; width: 36px; object-fit: contain; display: block; }
+.navbar-brand small {
+  display: block;
+  font-size: .6875rem;
+  font-weight: 400;
+  letter-spacing: .02em;
+  color: var(--tblr-secondary);
+  text-transform: none;
+}
+
+.navbar-user {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  font-size: .8125rem;
+}
+.navbar-user .navbar-user-meta { line-height: 1.25; text-align: right; }
+.navbar-user .navbar-user-meta strong { font-weight: var(--tblr-font-weight-medium); display: block; }
+.navbar-user .navbar-user-meta span { color: var(--tblr-secondary); font-size: .75rem; text-transform: capitalize; }
+
+/* The menu strip below the header - Tabler's horizontal layout. */
+.navbar-secondary {
+  background: var(--tblr-surface);
+  border-bottom: 1px solid var(--tblr-border-translucent);
+  box-shadow: var(--tblr-shadow-card);
+}
+.navbar-nav {
+  display: flex;
+  align-items: stretch;
+  gap: .125rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.navbar-nav::-webkit-scrollbar { display: none; }
+.navbar-nav .nav-link {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .75rem .75rem;
+  color: var(--tblr-secondary);
+  font-weight: var(--tblr-font-weight-medium);
+  text-decoration: none;
+  white-space: nowrap;
+  border-bottom: 2px solid transparent;
+  transition: color .15s ease-in-out, border-color .15s ease-in-out;
+}
+.navbar-nav .nav-link:hover { color: var(--tblr-body-color); text-decoration: none; }
+.navbar-nav .nav-link.active {
+  color: var(--tblr-primary);
+  border-bottom-color: var(--tblr-primary);
+}
+.navbar-nav .nav-link svg { flex: none; }
+
+/* Legacy .topbar. Nothing renders it any more, but a page added from an older
+   branch would otherwise land unstyled. */
 .topbar {
-  background: var(--navy);
-  color: #fff;
-  padding: .8rem 1.6rem;
-  display: flex; align-items: center; gap: 1.4rem;
+  background: var(--tblr-surface);
+  color: var(--tblr-body-color);
+  border-bottom: 1px solid var(--tblr-border-translucent);
+  padding: .75rem 1.5rem;
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
 }
-.topbar .brand { font-weight: 700; letter-spacing: .04em; font-size: 1.02rem; }
-.topbar .brand small { display: block; font-weight: 400; opacity: .75; font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; }
-.topbar nav { display: flex; gap: .35rem; margin-left: auto; }
+.topbar .brand { font-weight: var(--tblr-font-weight-bold); }
+.topbar .brand small { display: block; font-weight: 400; color: var(--tblr-secondary); font-size: .6875rem; }
+.topbar nav { display: flex; gap: .125rem; margin-left: auto; }
 .topbar nav a {
-  color: #dbe5ee; text-decoration: none; padding: .38rem .8rem; border-radius: 6px; font-size: .9rem;
+  color: var(--tblr-secondary); text-decoration: none;
+  padding: .375rem .75rem; border-radius: var(--tblr-border-radius);
+  font-weight: var(--tblr-font-weight-medium);
 }
-.topbar nav a:hover, .topbar nav a.active { background: var(--navy-2); color: #fff; }
-.topbar .user { font-size: .82rem; opacity: .85; margin-left: 1rem; }
+.topbar nav a:hover, .topbar nav a.active {
+  background: var(--tblr-active-bg); color: var(--tblr-primary); text-decoration: none;
+}
+.topbar .user { font-size: .8125rem; color: var(--tblr-secondary); margin-left: 1rem; }
 
-main { flex: 1; width: 100%; max-width: 1100px; margin: 0 auto; padding: 1.6rem; }
+/* ===================================================================== cards */
 
 .card {
-  background: var(--card); border: 1px solid var(--line); border-radius: 10px;
-  padding: 1.3rem 1.5rem; margin-bottom: 1.2rem;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--tblr-surface);
+  border: 1px solid var(--tblr-border-translucent);
+  border-radius: var(--tblr-border-radius-lg);
+  box-shadow: var(--tblr-shadow-card);
+  /* The old .card was padding + margin-bottom in one. Both are kept so pages
+     that drop content straight into a .card still look right, and .card-body
+     resets the padding when the Tabler anatomy is used properly. */
+  padding: 1rem 1.25rem;
+  margin-bottom: var(--tblr-page-padding);
+}
+/* `.flush` is the explicit opt-out for the Tabler anatomy; the :has() rules
+   below do the same for markup that forgets it, on browsers that support them.
+   Both are here because the padding has to be right either way. */
+.card.flush,
+.card:has(> .card-header),
+.card:has(> .card-body),
+.card:has(> .card-footer),
+.card:has(> .card-table) { padding: 0; }
+
+.card-header {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--tblr-border-translucent);
+  background: transparent;
+  border-radius: var(--tblr-border-radius-lg) var(--tblr-border-radius-lg) 0 0;
+}
+.card-header .card-actions { margin-left: auto; display: flex; gap: .5rem; align-items: center; }
+.card-body { flex: 1 1 auto; padding: 1rem 1.25rem; }
+.card-body + .card-body { border-top: 1px solid var(--tblr-border-translucent); }
+.card-footer {
+  padding: .75rem 1.25rem;
+  border-top: 1px solid var(--tblr-border-translucent);
+  background: var(--tblr-surface-secondary);
+  color: var(--tblr-secondary);
+  border-radius: 0 0 var(--tblr-border-radius-lg) var(--tblr-border-radius-lg);
+}
+.card-title { margin: 0; font-size: 1rem; font-weight: var(--tblr-font-weight-bold); }
+.card-subtitle { margin: .25rem 0 0; color: var(--tblr-secondary); font-size: .8125rem; }
+.card-sm > .card-body { padding: 1rem; }
+.card-link { text-decoration: none; color: inherit; display: block; height: 100%; }
+.card-link:hover { text-decoration: none; }
+.card-link:hover .card { border-color: rgba(var(--tblr-primary-rgb), .4); }
+
+/* A card whose whole top edge carries a status colour - Tabler's card-status-top. */
+.card-status-top {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  border-radius: var(--tblr-border-radius-lg) var(--tblr-border-radius-lg) 0 0;
+  background: var(--tblr-border-color);
+}
+.card-status-top.bg-primary { background: var(--tblr-primary); }
+.card-status-top.bg-success { background: var(--tblr-success); }
+.card-status-top.bg-warning { background: var(--tblr-warning); }
+.card-status-top.bg-danger  { background: var(--tblr-danger); }
+.card-status-top.bg-muted   { background: var(--tblr-gray-300); }
+
+/* A table that fills a card edge to edge. */
+.card-table { margin: 0; }
+.card-table th:first-child, .card-table td:first-child { padding-left: 1.25rem; }
+.card-table th:last-child,  .card-table td:last-child  { padding-right: 1.25rem; }
+.card-table tr:last-child td { border-bottom: 0; }
+
+/* ====================================================================== grid */
+
+.grid { display: grid; gap: var(--tblr-page-padding); }
+.grid.cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.grid.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.grid.cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+/* Tabler's row-cards: equal-height cards that reflow by minimum width rather
+   than by breakpoint, which is what a dashboard of stat tiles wants. */
+.row-cards {
+  display: grid;
+  gap: var(--tblr-page-padding);
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+}
+.row-cards > * { margin-bottom: 0; }
+.row-cards .card { margin-bottom: 0; height: 100%; }
+
+.datagrid {
+  display: grid;
+  gap: 1.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+}
+.datagrid-content { font-size: .875rem; }
+
+@media (max-width: 900px) {
+  .grid.cols-2, .grid.cols-3, .grid.cols-4 { grid-template-columns: 1fr; }
 }
 
-.grid { display: grid; gap: 1.2rem; }
-.grid.cols-2 { grid-template-columns: 1fr 1fr; }
-@media (max-width: 800px) { .grid.cols-2 { grid-template-columns: 1fr; } }
-
-label { display: block; font-size: .82rem; color: var(--muted); margin-bottom: .25rem; font-weight: 600; letter-spacing: .02em; }
-input, select {
-  width: 100%; padding: .55rem .7rem; border: 1px solid var(--line); border-radius: 7px;
-  font: inherit; background: #fff; color: var(--ink);
-}
-input:focus, select:focus { outline: 2px solid var(--navy-2); border-color: transparent; }
+/* =================================================================== buttons */
 
 .btn {
-  display: inline-block; border: 0; border-radius: 7px; padding: .6rem 1.25rem;
-  font: inherit; font-weight: 600; cursor: pointer; letter-spacing: .01em;
-  background: var(--navy); color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .5rem;
+  padding: .5625rem 1rem;
+  font-family: inherit;
+  font-size: .875rem;
+  font-weight: var(--tblr-font-weight-medium);
+  line-height: 1.25rem;
+  white-space: nowrap;
+  cursor: pointer;
+  text-decoration: none;
+  color: var(--tblr-body-color);
+  background: var(--tblr-surface);
+  border: 1px solid var(--tblr-border-color);
+  border-radius: var(--tblr-border-radius);
+  box-shadow: var(--tblr-shadow-input);
+  transition: background-color .15s ease-in-out, border-color .15s ease-in-out, color .15s ease-in-out;
 }
-.btn:hover { background: var(--navy-2); }
-.btn.secondary { background: #e8edf2; color: var(--navy); }
-.btn.gold { background: var(--gold); }
-.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn:hover { text-decoration: none; border-color: var(--tblr-gray-300); }
+.btn:active { background: var(--tblr-gray-100); }
+.btn:disabled, .btn.disabled { opacity: .4; cursor: not-allowed; pointer-events: none; }
+.btn svg { flex: none; }
 
-table { width: 100%; border-collapse: collapse; font-size: .88rem; }
-th { text-align: left; color: var(--muted); font-size: .74rem; text-transform: uppercase; letter-spacing: .06em; padding: .5rem .6rem; border-bottom: 2px solid var(--line); }
-td { padding: .5rem .6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
-tr:hover td { background: #f8fafb; }
+/* The default button in this application has always been the filled primary
+   one, and every page writes plain `className="btn"` for it. */
+.btn, .btn.primary {
+  color: #fff;
+  background: var(--tblr-primary);
+  border-color: var(--tblr-primary);
+}
+.btn:hover, .btn.primary:hover { background: #0561ba; border-color: #0561ba; }
+.btn:active, .btn.primary:active { background: #0558a6; }
 
-.badge { display: inline-block; padding: .12rem .55rem; border-radius: 20px; font-size: .74rem; font-weight: 700; letter-spacing: .03em; }
-.badge.ok { background: #e2f2e8; color: var(--ok); }
-.badge.warn { background: #f7ecd9; color: var(--warn); }
-.badge.bad { background: #f8e4e4; color: var(--bad); }
-.badge.muted { background: #e8edf2; color: var(--muted); }
+.btn.secondary {
+  color: var(--tblr-body-color);
+  background: var(--tblr-surface);
+  border-color: var(--tblr-border-color);
+}
+.btn.secondary:hover { background: var(--tblr-gray-50); border-color: var(--tblr-gray-300); }
 
-.steps { display: flex; gap: .4rem; margin-bottom: 1.3rem; flex-wrap: wrap; }
+.btn.gold    { color: #fff; background: var(--tblr-warning); border-color: var(--tblr-warning); }
+.btn.gold:hover { background: #dd9000; border-color: #dd9000; }
+.btn.success { color: #fff; background: var(--tblr-success); border-color: var(--tblr-success); }
+.btn.success:hover { background: #2aa13d; border-color: #2aa13d; }
+.btn.danger  { color: #fff; background: var(--tblr-danger); border-color: var(--tblr-danger); }
+.btn.danger:hover  { background: #c03434; border-color: #c03434; }
+.btn.ghost {
+  color: var(--tblr-secondary); background: transparent;
+  border-color: transparent; box-shadow: none;
+}
+.btn.ghost:hover { background: var(--tblr-gray-100); color: var(--tblr-body-color); border-color: transparent; }
+
+.btn.sm { padding: .25rem .5rem; font-size: .75rem; line-height: 1rem; }
+.btn.lg { padding: .75rem 1.25rem; font-size: 1rem; }
+
+.btn-list { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+
+/* ===================================================================== forms */
+
+label, .form-label {
+  display: block;
+  margin-bottom: .5rem;
+  font-size: .875rem;
+  font-weight: var(--tblr-font-weight-medium);
+  color: var(--tblr-body-color);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+input, select, textarea, .form-control, .form-select {
+  display: block;
+  width: 100%;
+  padding: .5625rem 1rem;
+  font-family: inherit;
+  font-size: .875rem;
+  font-weight: 400;
+  line-height: 1.25rem;
+  color: var(--tblr-body-color);
+  background-color: var(--tblr-surface);
+  background-clip: padding-box;
+  border: 1px solid var(--tblr-border-color);
+  border-radius: var(--tblr-border-radius);
+  box-shadow: var(--tblr-shadow-input);
+  appearance: none;
+  transition: border-color .15s ease-in-out, box-shadow .15s ease-in-out;
+}
+select, .form-select {
+  padding-right: 3rem;
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%239ca3af' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 1rem center;
+  background-size: 16px 12px;
+}
+/* The rule above sets appearance:none, which is right for a text field and
+   fatal for a tick box: it erases the dot and the check, so the Compile page's
+   "Upload an extract / Pull from ClinicMaster" pair renders as two identical
+   empty circles with no way to see which is chosen. These are put back to the
+   platform control, tinted with the Tabler primary. */
+input[type="checkbox"], input[type="radio"] {
+  appearance: auto;
+  -webkit-appearance: auto;
+  width: 1rem;
+  height: 1rem;
+  display: inline-block;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  vertical-align: middle;
+  accent-color: var(--tblr-primary);
+  cursor: pointer;
+}
+input[type="file"] { padding: .3125rem 1rem .3125rem .3125rem; }
+input[type="file"]::file-selector-button {
+  margin-right: .75rem;
+  padding: .375rem .75rem;
+  font: inherit;
+  font-weight: var(--tblr-font-weight-medium);
+  color: var(--tblr-body-color);
+  background: var(--tblr-surface-secondary);
+  border: 1px solid var(--tblr-border-color);
+  border-radius: var(--tblr-border-radius-sm);
+  cursor: pointer;
+}
+input[type="file"]::file-selector-button:hover { background: var(--tblr-gray-100); }
+input:focus, select:focus, textarea:focus,
+.form-control:focus, .form-select:focus {
+  outline: 0;
+  border-color: rgba(var(--tblr-primary-rgb), .6);
+  box-shadow: 0 0 0 .25rem rgba(var(--tblr-primary-rgb), .25);
+}
+input::placeholder, textarea::placeholder { color: var(--tblr-gray-400); }
+input:disabled, select:disabled { background: var(--tblr-gray-100); color: var(--tblr-gray-500); }
+
+.form-hint { margin-top: .25rem; font-size: .75rem; color: var(--tblr-secondary); }
+
+/* ==================================================================== tables */
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .875rem;
+  color: var(--tblr-body-color);
+}
+th {
+  text-align: left;
+  color: var(--tblr-secondary);
+  font-size: .75rem;
+  font-weight: var(--tblr-font-weight-medium);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  padding: .5rem .75rem;
+  background: var(--tblr-surface-secondary);
+  border-bottom: 1px solid var(--tblr-border-translucent);
+  white-space: nowrap;
+}
+td {
+  padding: .625rem .75rem;
+  border-bottom: 1px solid var(--tblr-border-translucent);
+  vertical-align: top;
+}
+tbody tr:hover td { background: rgba(var(--tblr-body-color-rgb), .02); }
+
+/* ==================================================================== badges */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .25rem;
+  padding: .25em .5em;
+  font-size: .85714286em;
+  font-weight: var(--tblr-font-weight-medium);
+  line-height: 1;
+  letter-spacing: .04em;
+  white-space: nowrap;
+  border: 1px solid transparent;
+  border-radius: var(--tblr-border-radius);
+  color: var(--tblr-secondary);
+  background: var(--tblr-surface-secondary);
+}
+.badge.ok      { color: #1f7a30; background: rgba(47, 179, 68, .12);  border-color: rgba(47, 179, 68, .2); }
+.badge.warn    { color: #9a6400; background: rgba(245, 159, 0, .14);  border-color: rgba(245, 159, 0, .24); }
+.badge.bad     { color: #a72929; background: rgba(214, 57, 57, .12);  border-color: rgba(214, 57, 57, .2); }
+.badge.muted   { color: var(--tblr-gray-600); background: var(--tblr-gray-100); border-color: var(--tblr-gray-200); }
+.badge.info    { color: #2b6cb0; background: rgba(66, 153, 225, .14); border-color: rgba(66, 153, 225, .24); }
+.badge.primary { color: #0558a6; background: rgba(var(--tblr-primary-rgb), .1); border-color: rgba(var(--tblr-primary-rgb), .2); }
+.badge.pill    { border-radius: var(--tblr-border-radius-pill); padding-inline: .625em; }
+
+/* Tabler's status dot: a coloured disc that reads at a glance in a dense row. */
+.status-dot {
+  display: inline-block;
+  width: .5rem;
+  height: .5rem;
+  border-radius: var(--tblr-border-radius-pill);
+  background: var(--tblr-gray-400);
+  flex: none;
+}
+.status-dot.ok      { background: var(--tblr-success); }
+.status-dot.warn    { background: var(--tblr-warning); }
+.status-dot.bad     { background: var(--tblr-danger); }
+.status-dot.primary { background: var(--tblr-primary); }
+.status-dot.animated { box-shadow: 0 0 0 0 rgba(47, 179, 68, .5); animation: status-pulse 2s infinite; }
+@keyframes status-pulse {
+  70%  { box-shadow: 0 0 0 .5rem rgba(47, 179, 68, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(47, 179, 68, 0); }
+}
+.status {
+  display: inline-flex; align-items: center; gap: .5rem;
+  font-size: .75rem; font-weight: var(--tblr-font-weight-medium);
+  text-transform: uppercase; letter-spacing: .04em;
+}
+
+/* ==================================================================== avatar */
+
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  flex: none;
+  font-size: 1rem;
+  font-weight: var(--tblr-font-weight-medium);
+  line-height: 1;
+  color: var(--tblr-secondary);
+  background: var(--tblr-surface-secondary);
+  border-radius: var(--tblr-border-radius);
+  box-shadow: inset 0 0 0 1px var(--tblr-border-translucent);
+}
+.avatar.sm { width: 2rem; height: 2rem; font-size: .75rem; }
+.avatar.primary { color: #fff; background: var(--tblr-primary); box-shadow: none; }
+.avatar.success { color: #fff; background: var(--tblr-success); box-shadow: none; }
+.avatar.warning { color: #fff; background: var(--tblr-warning); box-shadow: none; }
+.avatar.danger  { color: #fff; background: var(--tblr-danger);  box-shadow: none; }
+.avatar.azure   { color: #fff; background: var(--tblr-azure);   box-shadow: none; }
+.avatar.soft-primary { color: var(--tblr-primary); background: rgba(var(--tblr-primary-rgb), .1); box-shadow: none; }
+.avatar.soft-success { color: #1f7a30; background: rgba(47, 179, 68, .12); box-shadow: none; }
+.avatar.soft-warning { color: #9a6400; background: rgba(245, 159, 0, .14); box-shadow: none; }
+.avatar.soft-danger  { color: #a72929; background: rgba(214, 57, 57, .12); box-shadow: none; }
+
+/* ================================================================= stat tile
+ *
+ * The old .kpis/.kpi block, restyled as Tabler's stat card. The markup
+ * contract is unchanged - .kpi holds a .n and an .l - so the push result
+ * summary on the Compile page picks this up without being touched.
+ */
+
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: var(--tblr-page-padding);
+  margin: .5rem 0 1rem;
+}
+.kpi {
+  background: var(--tblr-surface);
+  border: 1px solid var(--tblr-border-translucent);
+  border-radius: var(--tblr-border-radius-lg);
+  box-shadow: var(--tblr-shadow-card);
+  padding: 1rem;
+  min-width: 0;
+}
+.kpi .l {
+  font-size: .75rem;
+  font-weight: var(--tblr-font-weight-medium);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  line-height: 1rem;
+  color: var(--tblr-secondary);
+  margin-bottom: .25rem;
+  order: -1;
+}
+.kpi .n {
+  font-size: 1.5rem;
+  line-height: 2rem;
+  font-weight: var(--tblr-font-weight-bold);
+  color: var(--tblr-body-color);
+  letter-spacing: -.01em;
+}
+/* .n is written before .l in the existing markup; the label belongs on top in
+   Tabler's tile, and flex ordering puts it there without editing the pages. */
+.kpi { display: flex; flex-direction: column; }
+
+/* The dashboard's own tile, which carries an icon and a footnote. */
+.stat { display: flex; align-items: flex-start; gap: 1rem; }
+.stat-body { min-width: 0; flex: 1; }
+.stat-value {
+  font-size: 1.5rem;
+  line-height: 2rem;
+  font-weight: var(--tblr-font-weight-bold);
+  letter-spacing: -.01em;
+  display: flex;
+  align-items: baseline;
+  gap: .5rem;
+}
+.stat-value small { font-size: .75rem; font-weight: var(--tblr-font-weight-medium); color: var(--tblr-secondary); letter-spacing: 0; }
+.stat-foot { font-size: .75rem; color: var(--tblr-secondary); margin-top: .25rem; }
+
+/* ===================================================================== steps
+ *
+ * The Compile page's four-stage indicator and the Preview page's report
+ * picker both render .steps > .step. Tabler draws a step trail as connected
+ * segments; the pills below keep the same footprint but adopt the palette and
+ * the pill radius, so neither page needs editing.
+ */
+
+.steps { display: flex; gap: .5rem; margin-bottom: 1.25rem; flex-wrap: wrap; }
 .steps .step {
-  padding: .45rem .95rem; border-radius: 20px; font-size: .82rem; font-weight: 600;
-  background: #e8edf2; color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  gap: .375rem;
+  padding: .375rem .875rem;
+  border-radius: var(--tblr-border-radius-pill);
+  font-size: .8125rem;
+  font-weight: var(--tblr-font-weight-medium);
+  background: var(--tblr-surface);
+  border: 1px solid var(--tblr-border-color);
+  color: var(--tblr-secondary);
+  cursor: inherit;
+  transition: background-color .15s ease-in-out, border-color .15s ease-in-out, color .15s ease-in-out;
 }
-.steps .step.active { background: var(--navy); color: #fff; }
-.steps .step.done { background: #e2f2e8; color: var(--ok); }
+.steps .step:hover { border-color: var(--tblr-gray-300); }
+.steps .step.active {
+  background: var(--tblr-primary);
+  border-color: var(--tblr-primary);
+  color: #fff;
+}
+.steps .step.done {
+  background: rgba(47, 179, 68, .1);
+  border-color: rgba(47, 179, 68, .3);
+  color: #1f7a30;
+}
+.steps .step.done::before { content: '✓'; font-weight: 700; }
 
-.alert { border-radius: 8px; padding: .8rem 1rem; margin: .8rem 0; font-size: .9rem; }
-.alert.error { background: #f8e4e4; color: var(--bad); }
-.alert.success { background: #e2f2e8; color: var(--ok); }
-.alert.info { background: #e7eef6; color: var(--navy-2); }
-/* Consistency findings on an uploaded tally. 'warn' is a figure that is
-   possible but has previously only ever been a fault; 'error' is one that
-   cannot be true. Both appear above the Compile button, so they are read
-   while the numbers are still a file rather than a submission. */
-.alert.warn { background: #fbf1de; color: var(--warn); }
+/* ==================================================================== alerts */
 
-.kpis { display: flex; gap: 1rem; flex-wrap: wrap; margin: .6rem 0 1rem; }
-.kpi { background: #f2f5f8; border-radius: 8px; padding: .7rem 1.1rem; min-width: 130px; }
-.kpi .n { font-size: 1.5rem; font-weight: 700; color: var(--navy); }
-.kpi .l { font-size: .75rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+.alert {
+  position: relative;
+  border: 1px solid transparent;
+  border-radius: var(--tblr-border-radius);
+  padding: .75rem 1rem;
+  margin: .75rem 0;
+  font-size: .875rem;
+}
+.alert.error   { color: #a72929; background: rgba(214, 57, 57, .08);  border-color: rgba(214, 57, 57, .2); }
+.alert.success { color: #1f7a30; background: rgba(47, 179, 68, .08);  border-color: rgba(47, 179, 68, .2); }
+.alert.info    { color: #2b6cb0; background: rgba(66, 153, 225, .08); border-color: rgba(66, 153, 225, .22); }
+.alert.warn    { color: #9a6400; background: rgba(245, 159, 0, .1);   border-color: rgba(245, 159, 0, .24); }
+.alert a { color: inherit; text-decoration: underline; }
 
-.footer { text-align: center; color: var(--muted); font-size: .78rem; padding: 1rem; }
+/* ================================================================== progress */
 
-.login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: var(--navy); }
-.login-card { background: #fff; border-radius: 12px; padding: 2.4rem 2.6rem; width: 380px; }
-.login-card h1 { text-align: center; }
-.login-card .sub { text-align: center; color: var(--muted); font-size: .85rem; margin-bottom: 1.4rem; }
+.progress {
+  position: relative;
+  display: flex;
+  height: .5rem;
+  overflow: hidden;
+  background: var(--tblr-gray-200);
+  border-radius: var(--tblr-border-radius-pill);
+}
+.progress.lg { height: .75rem; }
+.progress-bar {
+  display: block;
+  height: 100%;
+  background: var(--tblr-primary);
+  transition: width .3s ease;
+}
+.progress-bar.success { background: var(--tblr-success); }
+.progress-bar.warning { background: var(--tblr-warning); }
+.progress-bar.danger  { background: var(--tblr-danger); }
+.progress-bar.muted   { background: var(--tblr-gray-300); }
+
+/* =============================================================== empty state */
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2.5rem 1rem;
+  text-align: center;
+  color: var(--tblr-secondary);
+}
+.empty-icon { color: var(--tblr-gray-300); margin-bottom: .75rem; }
+.empty-title { font-size: 1rem; font-weight: var(--tblr-font-weight-bold); color: var(--tblr-body-color); margin-bottom: .25rem; }
+.empty-subtitle { font-size: .8125rem; max-width: 34rem; }
+
+/* ================================================================== helpers */
+
+.text-secondary { color: var(--tblr-secondary); }
+.text-success   { color: #1f7a30; }
+.text-danger    { color: #a72929; }
+.text-warning   { color: #9a6400; }
+.text-primary   { color: var(--tblr-primary); }
+.text-end       { text-align: right; }
+.text-nowrap    { white-space: nowrap; }
+.fw-medium      { font-weight: var(--tblr-font-weight-medium); }
+.fw-bold        { font-weight: var(--tblr-font-weight-bold); }
+.font-mono      { font-family: var(--tblr-font-monospace); }
+.d-flex         { display: flex; }
+.flex-wrap      { flex-wrap: wrap; }
+.items-center   { align-items: center; }
+.justify-between { justify-content: space-between; }
+.gap-1 { gap: .25rem; } .gap-2 { gap: .5rem; } .gap-3 { gap: .75rem; } .gap-4 { gap: 1rem; }
+.ms-auto { margin-left: auto; }
+.mb-0 { margin-bottom: 0; }
+.scroll-y { overflow-y: auto; }
+.scroll-x { overflow-x: auto; }
+
+/* ==================================================================== footer */
+
+.footer {
+  border-top: 1px solid var(--tblr-border-translucent);
+  background: var(--tblr-surface);
+  text-align: center;
+  color: var(--tblr-secondary);
+  font-size: .75rem;
+  padding: 1.25rem 1rem;
+}
+
+/* ===================================================================== login */
+
+.login-wrap {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: var(--tblr-body-bg);
+}
+.login-card {
+  background: var(--tblr-surface);
+  border: 1px solid var(--tblr-border-translucent);
+  border-radius: var(--tblr-border-radius-lg);
+  box-shadow: var(--tblr-shadow-dropdown);
+  padding: 2rem;
+  width: 100%;
+  max-width: 25rem;
+}
+.login-card h1 { text-align: center; font-size: 1.25rem; }
+.login-card .sub {
+  text-align: center;
+  color: var(--tblr-secondary);
+  font-size: .8125rem;
+  margin-bottom: 1.5rem;
+}
+
+/* =================================================================== print */
+
+@media print {
+  .navbar, .navbar-secondary, .topbar, .footer, .btn { display: none !important; }
+  body { background: #fff; }
+  .card { box-shadow: none; border-color: #d1d5db; break-inside: avoid; }
+}
