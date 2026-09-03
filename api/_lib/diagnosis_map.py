@@ -50,7 +50,7 @@ EMR_RULES = [
     (r"ACUTE.*PSYCHOTIC|BRIEF PSYCHOTIC|PSYCHOSIS|PSYCHOTIC", "MH05"),
     (r"SEVERE PNEUMONIA", "CD13"),
     (r"\bPNEUMONIA", "CD12"),
-    (r"UPPER RESPIRATORY|ACUTE.*RESPIRATORY INFECT|COMMON COLD|\bCOLD\b", "CD11"),
+    (r"UPPER RESPIRATORY|ACUTE.*RESPIRATORY INFECT|COMMON COLD|\bCOLD\b|\bCOUGH\b", "CD11"),
     (r"\bASTHMA", "CR01"),
     (r"COPD|CHRONIC OBSTRUCTIVE", "CR02"),
     (r"BRONCHITIS|BRONCHIOLITIS|ALLERGIC AIRWAY", "CR03"),
@@ -63,13 +63,18 @@ EMR_RULES = [
     (r"GENITAL ULCER", "CD04"),
     (r"CHLAMYDIA|GONORRH|SYPHILIS|SEXUALLY TRANSMITTED|\bSTI\b", "CD06"),
     (r"ALLERGIC CONJUNCTIVITIS|ALLERGIC CONJUCTIVITIS", "EC01"),
-    (r"BACTERIAL CONJUNCTIVITIS", "EC02"),
-    (r"CONJUNCTIVITIS|CONJUCTIVITIS", "EC04_2019"),
+    # Jinja's dictionary spells this "BACTERIAL CONJUCTIVITIS", 44 cases in
+    # July 2026, and the strict spelling sent every one of them to the general
+    # eye line. The allergic rule already tolerated both spellings; this one did
+    # not, which is the kind of asymmetry only a count exposes.
+    (r"BACTERIAL CONJU[N]?CTIVITIS", "EC02"),
+    (r"CONJUNCTIVITIS|CONJUCTIVITIS", "EC25"),
     (r"CORNEAL ULCER|KERATITIS", "EC04"),
     (r"\bCATARACT", "EC05"),
     (r"REFRACTIVE ERROR|DISORDERS? (OF|DUE).*REFRACT|MYOPIA|HYPERMETROPIA|ASTIGMAT", "EC07"),
     (r"\bGLAUCOMA", "EC08"),
-    (r"DRY EYE|PTERYGIUM|PINGUECULA|UVEITIS|EYE", "EC25_2019"),
+    (r"\bUVEITIS|IRIDOCYCLITIS", "EC14"),
+    (r"DRY EYE|PTERYGIUM|PINGUECULA|EYE", "EC25"),
     (r"MALARIA IN PREGNAN", "MC03"),
     (r"MALARIA DUE TO|CONFIRMED MALARIA|\bMALARIA\b", "EP01c"),
     (r"TYPHOID", "EP15"),
@@ -80,6 +85,12 @@ EMR_RULES = [
     (r"HEPATITIS C", "LD08"),
     (r"\bSKIN\b|DERMATITIS|ECZEMA|TINEA|SCABIES|FUNGAL INFECTION", "CD14"),
     (r"SINUSITIS", "EN05"),
+    # Order matters here: "hypertrophy of tonsils with hypertrophy of adenoids"
+    # is one of Jinja's commonest ENT entries and the form has a line for each.
+    # The first condition named wins, which is the convention a records officer
+    # follows on paper.
+    (r"TONSILLAR HYPERTROPH|HYPERTROPHY OF TONSIL", "EN14"),
+    (r"ADENOID", "EN07"),
     (r"TONSILLITIS", "EN13"),
     (r"OTITIS MEDIA", "EN01"),
     (r"OTITIS EXTERNA", "EN10"),
@@ -94,22 +105,66 @@ EMR_RULES = [
     (r"ANIMAL BITE|DOG BITE|SUSPECTED RABIES", "IN04a"),
     (r"SNAKE BITE", "IN05"),
     (r"INSECT BITE", "IN06"),
-    (r"LUMBAGO|LOW BACK PAIN|BACK PAIN|SCIATICA|RADICULOPATH|SPONDYL", "PT16"),
-    (r"MYALGIA|MUSCLE (STRAIN|SPRAIN)|SOFT TISSUE|OSTEOARTHRIT|\bJOINT\b|ARTHRITIS", "PT02"),
-    (r"CLUBFOOT|VENTRICULAR SEPTAL|CONGENITAL|BIRTH DEFECT", "PT15"),
-    (r"HEMIPLEGIA|PARAPLEGIA|SPINAL CORD|PARALYSIS", "PT06"),
-    (r"PERIPHERAL NEUROPATH|NEUROPATH|FACIAL NEURITIS|NEURITIS|FACIAL PALSY", "PT09"),
+    # The musculoskeletal and physiotherapy conditions below have NO line on the
+    # current 105:01 form. They had one on the 2019 form - PT02 Joint
+    # dysfunction, PT06 Paralysis, PT09 Facial palsy, PT15 Congenital
+    # abnormalities, PT16 Spine disorders - and those five elements are still
+    # attached to the data set, so writing to them succeeds and DHIS2 stores the
+    # figure. Nobody sees it: the form the Ministry reads no longer has the row.
+    # In July 2026 that silently hid 717 conditions, 7.2 per cent of everything
+    # Jinja recorded. All others is a worse answer clinically and a better one
+    # honestly - the case is counted on a line a person can actually read.
+    (r"LUMBAGO|LOW BACK PAIN|BACK PAIN|SCIATICA|RADICULOPATH|SPONDYL", "OP01"),
+    (r"MYALGIA|MUSCLE (STRAIN|SPRAIN)|SOFT TISSUE|OSTEOARTHRIT|\bJOINT\b|ARTHRITIS", "OP01"),
+    (r"CLUBFOOT|VENTRICULAR SEPTAL|CONGENITAL|BIRTH DEFECT", "OP01"),
+    (r"HEMIPLEGIA|PARAPLEGIA|SPINAL CORD|PARALYSIS", "OP01"),
+    (r"PERIPHERAL NEUROPATH|NEUROPATH|FACIAL NEURITIS|NEURITIS|FACIAL PALSY", "OP01"),
     (r"SUPERVISION OF NORMAL PREGNAN|NORMAL PREGNAN", "MC03"),
     (r"ANAEMIA COMPLICATING PREGNAN", "MC03"),
-    (r"ANAEMIA|ANEMIA", "NC02_2019"),
+    # NC02 on the current form is "Other Haemoglobinopathies", not the 2019
+    # form's "Other types of Anaemia". The code was reused for a different
+    # condition, so anaemia has no line of its own any more.
+    (r"ANAEMIA|ANEMIA", "OP01"),
     (r"BACTERAEMIA|SEPSIS|SEPTICAEMIA|SEPTICEMIA", "OP01"),
-    (r"SUBSTANCE|PSYCHOACTIVE|DRUG USE|ALCOHOL USE", "MH17_2019"),
+    (r"ALCOHOL", "MH26"),
+    (r"SUBSTANCE|PSYCHOACTIVE|DRUG USE|CANNAB|OPIOID", "MH31"),
     (r"MIGRAINE|HEADACHE", "OP01"),
     (r"PROSTATE|HYPERPLASIA OF PROSTATE", "CA15"),
 ]
 
 _POLICY = [(re.compile(p), c) for p, c in POLICY_RULES]
 _EMR = [(re.compile(p), c) for p, c in EMR_RULES]
+
+
+# ------------------------------------------------- elements the form dropped
+# Nine elements received July 2026's data and appear nowhere on the current
+# 105:01 form. Five are the 2019 physiotherapy section; four are _2019 variants
+# whose codes the current form has REUSED for something else, which is the part
+# that makes this worse than a blank row:
+#
+#     EC04_2019  Other Forms of Conjunctivitis   EC04 now: Corneal Ulcers/Keratitis
+#     EC25_2019  Other Eye Disorders             EC25 now: Other eye conditions
+#     MH17_2019  Substance (Drug) use Disorder   MH17 now: Post-Traumatic Stress Disorder
+#     NC02_2019  Other types of Anaemia          NC02 now: Other Haemoglobinopathies
+#
+# A stale generated table, an old spreadsheet, or a records officer typing a
+# code they learned in 2019 all arrive here. Translating on the way out means
+# one table to review rather than a rule to remember in three places. Only two
+# of the nine have a true equivalent on the current form; the rest become All
+# others, which is a real line the Ministry reads.
+RETIRED_TO_CURRENT = {
+    "EC04_2019": "EC25",   # unspecified conjunctivitis: nearest current line
+    "EC25_2019": "EC25",   # same condition, current element
+    "MH17_2019": "MH31",   # Other Substance Use Disorders
+    "NC02_2019": "OP01",   # no anaemia line on the current form
+    "PT02": "OP01", "PT06": "OP01", "PT09": "OP01",
+    "PT15": "OP01", "PT16": "OP01",
+}
+
+
+def current_code(code):
+    """The current-form element for a code, translating retired ones."""
+    return RETIRED_TO_CURRENT.get(code, code)
 
 
 def _looks_like_code(token: str, code_index) -> bool:
@@ -161,7 +216,8 @@ def normalise_code(code: str) -> str:
 def icd11_to_hmis(code: str):
     """The HMIS 105 code for a ClinicMaster disease code, or None."""
     key = normalise_code(code)
-    return icd11_map().get(key) if key else None
+    hit = icd11_map().get(key) if key else None
+    return current_code(hit) if hit else None
 
 
 def map_diagnosis(raw: str, code_index, source: str = "emr"):
@@ -214,7 +270,7 @@ def map_diagnosis(raw: str, code_index, source: str = "emr"):
     allow_identity = source != "icd11"
 
     if allow_identity and _looks_like_code(raw, code_index):
-        return re.sub(r"\s+", "", raw)
+        return current_code(re.sub(r"\s+", "", raw))
 
     if source == "icd11":
         mapped = icd11_to_hmis(raw)
@@ -224,11 +280,11 @@ def map_diagnosis(raw: str, code_index, source: str = "emr"):
     for seg in segments:
         u = seg.upper()
         if _looks_like_code(seg, code_index):
-            return re.sub(r"\s+", "", seg)
+            return current_code(re.sub(r"\s+", "", seg))
         for rx, code in _POLICY:
             if rx.search(u):
-                return code
+                return current_code(code)
         for rx, code in _EMR:
             if rx.search(u):
-                return code
+                return current_code(code)
     return "OP01"
