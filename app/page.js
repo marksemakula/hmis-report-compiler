@@ -8,6 +8,7 @@ import {
 } from './icons';
 import DistrictMap from './districtmap';
 import MalariaChannel from './malariachannel';
+import Mortality from './mortality';
 import useWidth from './usewidth';
 
 /* ---------------------------------------------------------------- periods */
@@ -222,19 +223,25 @@ function FacilityView({ loading, rows, types, meta, agents, user }) {
         </div>
       )}
 
-      <div className="row-cards" style={{ marginBottom: 'var(--tblr-page-padding)' }}>
+      {/* Mortality takes the place the "Submitted to DHIS2" counter held. It is
+          given two columns rather than one: ten bars labelled with ICD-11 terms
+          need the width, and a submission counter is a number about this app
+          while this is a number about the hospital. The submitted total has not
+          been dropped - it reads on the Reports page, where the submissions
+          themselves are. */}
+      <div className="row-cards" style={{ marginBottom: 'var(--tblr-page-padding)',
+        gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) minmax(0,1.6fr)',
+        alignItems: 'start' }}>
         <StatTile Icon={IconDraft} tone="primary" label="Reports compiled"
-          value={loading ? '—' : nf(rows.length)}
+          value={loading ? '' : nf(rows.length)}
           foot={loading ? ' ' : `${nf(compiledThisYear)} in the last 12 months`} />
-        <StatTile Icon={IconCloudUp} tone="success" label="Submitted to DHIS2"
-          value={loading ? '—' : nf(submitted.length)}
-          foot={loading ? ' ' : `${nf(valuesSent)} data values accepted`} />
         <StatTile Icon={IconInbox} tone="warning" label="Awaiting submission"
           value={loading ? '—' : nf(drafts.length)}
           foot={loading ? ' ' : oldestDraft ? `Oldest: ${formatPeriod(oldestDraft.period)}` : 'Nothing waiting'} />
         <StatTile Icon={IconAlert} tone="danger" label="Failed submissions"
-          value={loading ? '—' : nf(failed.length)}
+          value={loading ? '' : nf(failed.length)}
           foot={loading ? ' ' : failed.length ? `Most recent: ${formatPeriod(failed[0].period)}` : 'None recorded'} />
+        <Mortality />
       </div>
 
       {/* alignItems start, not the grid default: the map card is roughly twice

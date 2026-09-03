@@ -23,7 +23,8 @@ from _lib.surveillance import (
     SURV_COLUMNS, check_consistency, compile_033b, describe_week,
     parse_week_period, template_csv, validate_surveillance_rows,
 )
-from _lib import analytics, consistency, coverage, dhis2, extract_scripts, forms, periods
+from _lib import (analytics, consistency, coverage, dhis2, extract_scripts, forms,
+                  mortality, periods)
 
 EXPECTED_COLUMNS = {"OPD": OPD_COLUMNS, "IPD": IPD_COLUMNS, "SURV": SURV_COLUMNS}
 
@@ -550,6 +551,28 @@ def malaria_channel(element: str = "", scope: str = "facility", year: int = None
         err(f"DHIS2 rejected the analytics request: {exc}", 502)
     except Exception as exc:
         err(f"The malaria channel could not be built: {type(exc).__name__}", 502)
+
+
+# ---------------- mortality ----------------
+
+@app.get("/api/py/mortality")
+def mortality_summary(period: str, weeks: int = 12, scope: str = "facility",
+                      user: dict = Depends(current_user)):
+    """Deaths against attendances for one period, and the causes behind them.
+
+    The causes come from the death certificates (HMIS 100), which is the only
+    place at this hospital where a cause of death is recorded. Events are
+    counted server-side and only the tally is returned - a certificate names
+    the deceased, and none of it reaches the browser."""
+    try:
+        return mortality.summary(period=period, weeks_back=max(0, min(int(weeks), 52)),
+                                 scope=scope)
+    except RuntimeError:
+        raise
+    except requests.HTTPError as exc:
+        err(f"DHIS2 rejected the mortality request: {exc}", 502)
+    except Exception as exc:
+        err(f"The mortality summary could not be built: {type(exc).__name__}", 502)
 
 
 # ---------------- audit ----------------
