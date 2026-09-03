@@ -20,6 +20,14 @@ import useWidth from './usewidth';
  * getting it right costs one logarithm and means the same component would not
  * quietly distort a region further from the equator.
  */
+
+/* How tall the figure may grow, and how much room the legend needs to sit
+   beside it rather than beneath. Both are here rather than buried in the
+   layout arithmetic because they are the two numbers anyone adjusting the
+   map's size will want. */
+const MAX_FIGURE_H = 500;
+const LEGEND_MIN_W = 170;
+
 function mercatorY(lat) {
   const clamped = Math.max(-85, Math.min(85, lat));
   return (Math.log(Math.tan(Math.PI / 4 + (clamped * Math.PI) / 360)) * 180) / Math.PI;
@@ -228,11 +236,25 @@ export default function DistrictMap({ homeDistrictOnly = false }) {
     return spanY > 0 ? (maxX - minX) / spanY : 1;
   }, [geo]);
 
+  /* Height is the binding dimension, so the height budget is what to set.
+     Deriving it from the card's WIDTH, as this did, gets the relationship
+     backwards for a shape this narrow: in the dashboard tile a 482px card gave
+     the figure 45 per cent of that as height, 217, raised to the 280 floor, and
+     the aspect ratio then made it 136 wide. A map 136 by 288 sat beside a
+     legend column of 346, so the key had two and a half times the width of the
+     thing it was a key to.
+
+     Take the height the card can reasonably carry instead, and let the aspect
+     ratio set the width from it. The legend needs about 150px for its widest
+     row ("This hospital's district"), so 170 is the threshold for keeping it
+     alongside; below that it drops underneath, which is the right answer on a
+     phone and the wrong one at 482px. */
   const { figureW, figureH, legendBeside } = useMemo(() => {
-    let h = Math.min(520, Math.max(280, Math.round(width * 0.45)));
+    let h = Math.min(MAX_FIGURE_H, Math.max(340, Math.round(width)));
     let w = Math.round(h * aspect);
+    // Still bounded by the card: a wide, short region must not overflow it.
     if (w > width) { w = width; h = Math.round(w / aspect); }
-    return { figureW: w, figureH: h, legendBeside: width - w > 280 };
+    return { figureW: w, figureH: h, legendBeside: width - w > LEGEND_MIN_W };
   }, [width, aspect]);
 
   const project = useMemo(
