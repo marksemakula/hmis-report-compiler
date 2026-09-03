@@ -700,6 +700,77 @@ try:
 except RuntimeError as exc:
     check("a malformed element is refused", "Check the parameter" in str(exc), True)
 
+print("\nThe outer ring is 105:01 attendance by age band, cumulative from January")
+metadata._MAPPING["HMIS105_01_codeIndex"] = {"OA01": "sv6SeKroHPV", "OA02": "sQ4EexvvhVe"}
+metadata._MAPPING["categoryCombos"] = {"OPD_AGE_SEX": {"id": "esaNB4G5AHs", "cocs": {
+    "0-28Dys, Male": "coc0028m001", "0-28Dys, Female": "coc0028f001",
+    "29Dys-4Yrs, Male": "coc29d4ym01", "29Dys-4Yrs, Female": "coc29d4yf01",
+    "5-9Yrs, Male": "coc59yrsm01", "5-9Yrs, Female": "coc59yrsf01",
+    "10-19Yrs, Male": "coc1019m001", "10-19Yrs, Female": "coc1019f001",
+    "20+Yrs, Male": "coc20plm001", "20+Yrs, Female": "coc20plf001",
+}}}
+
+
+class AgeSession(StubSession):
+    """105:01 attendance, ten combos a month, plus one combo this build has
+    never heard of."""
+
+    PER_COMBO = 12
+
+    def _analytics(self, params):
+        dims = {d.split(":", 1)[0]: d.split(":", 1)[1] for d in params.get("dimension", [])
+                if ":" in d}
+        combos = list(metadata._MAPPING["categoryCombos"]["OPD_AGE_SEX"]["cocs"].values())
+        rows = []
+        for pe in dims.get("pe", "").split(";"):
+            for dx in dims.get("dx", "").split(";"):
+                for co in combos + ["cocUNKNOWN1"]:
+                    rows.append([dx, pe, dims["ou"], co, str(self.PER_COMBO)])
+        return {"headers": [{"name": "dx"}, {"name": "pe"}, {"name": "ou"},
+                            {"name": "co"}, {"name": "value"}],
+                "metaData": {"items": {}}, "rows": rows}
+
+
+analytics.reset_cache()
+_a = AgeSession()
+prof = analytics.attendance_by_age(scope="facility", year=2026, session=_a)
+call = [p for u, p in _a.calls if "analytics" in u][0]
+check("the combo dimension is asked for", "co" in call["dimension"], True)
+pe = [d for d in call["dimension"] if d.startswith("pe:")][0].split(":", 1)[1].split(";")
+check("it asks from January", pe[0], "202601")
+check("...in months, because 105:01 is monthly", len(pe[0]), 6)
+check("all five age bands are returned", [b["band"] for b in prof["bands"]],
+      analytics.AGE_BAND_ORDER)
+# Two sexes x two elements x len(pe) months x 12 each.
+per_band = 2 * 2 * len(pe) * AgeSession.PER_COMBO
+check("male and female fold into one age band", prof["bands"][0]["value"], per_band)
+check("a combo this build does not know is counted, not dropped",
+      prof["unclassified"], 2 * len(pe) * AgeSession.PER_COMBO)
+check("the total includes it", prof["total"], per_band * 5 + prof["unclassified"])
+check("the band labels are readable", prof["bands"][0]["label"], "0 to 28 days")
+
+print("\nThe two rings are separate wholes and say which period each covers")
+analytics.reset_cache()
+both = analytics.tb_screening(scope="facility", year=2026, session=AgeSession())
+check("the age profile travels with the screening figures",
+      both["ageProfile"]["available"], True)
+check("the inner ring is counted in weeks", both["periodLabel"].startswith("Weeks 1 to "), True)
+check("...and the outer ring in months",
+      both["ageProfile"]["periodLabel"].startswith("January to "), True)
+
+print("\n105:01 being unreadable does not stop the screening split drawing")
+
+
+class NoAgeSession(ScreeningSession):
+    pass
+
+
+metadata._MAPPING["categoryCombos"] = {}
+analytics.reset_cache()
+without = analytics.tb_screening(scope="facility", year=2026, session=NoAgeSession())
+check("the outer ring is simply absent", without["ageProfile"]["available"], False)
+check("...and the inner ring still has its figures", without["attendance"], 20 * 340)
+
 print("\nA name the matcher does not recognise offers a choice, not a dead end")
 # The real 033B names differ between instances and form revisions. Refusing to
 # draw anything, and telling the operator to refresh metadata they already

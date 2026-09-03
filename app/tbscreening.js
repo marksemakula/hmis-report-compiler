@@ -20,10 +20,27 @@ import { IconAlert } from './icons';
  * Blue for screened, red for the gap. The two separate by 23.4 in the worst
  * colour-vision case, and both slices are directly labelled, so the reading
  * never rests on colour alone.
+ *
+ * The OUTER ring is the age profile of attendance, from 105:01, also cumulative
+ * from January. Two things follow from that and are stated on the card rather
+ * than left to be inferred:
+ *
+ *  - 105:01 is monthly and 033B is weekly, so the outer ring covers months 1 to
+ *    the current month while the inner covers weeks 1 to the current week.
+ *  - They are different returns, so their totals will not agree. Each ring is
+ *    therefore its own 100%. The outer ring does NOT subdivide the inner one,
+ *    and no angle in one corresponds to an angle in the other.
+ *
+ * Age bands are ordered, so the outer ring is a sequential ramp - one hue,
+ * light to dark, OKLab L 0.905/0.812/0.704/0.573/0.429 - not a categorical set.
+ * Teal rather than blue so the darkest band cannot be mistaken for the inner
+ * ring's blue; the mid step sits 22.8 from that blue and 15.4 from the red in
+ * the worst colour-vision case.
  */
 
 const SCREENED = '#066fd1';
 const NOT_SCREENED = '#d63939';
+const AGE_RAMP = ['#c9e7e2', '#8fd0c8', '#4fb3a8', '#1d8a80', '#0b5c56'];
 
 const LEVELS = [
   { scope: 'facility', label: 'Jinja RRH' },
@@ -144,7 +161,15 @@ export default function TbScreening() {
 
   const { attendance, screened, notScreened, rate } = data;
   const nothing = !data.reported || !attendance;
-  const S = 168, R = 74, RI = 48, C = S / 2;
+  const age = data.ageProfile || { available: false, bands: [], total: 0 };
+  const ageTotal = age.bands.reduce((a, b) => a + b.value, 0) + (age.unclassified || 0);
+  const hasAge = age.available && ageTotal > 0;
+
+  // Two concentric rings, each its own whole, with a gap of surface between
+  // them so neither reads as a subdivision of the other.
+  const S = 208, C = S / 2;
+  const OUTER_R = 100, OUTER_RI = 78;
+  const INNER_R = 70, INNER_RI = 44;
   const screenedDeg = nothing ? 0 : (screened / attendance) * 360;
 
   const slices = [
@@ -153,6 +178,14 @@ export default function TbScreening() {
     { key: 'not', label: 'Not screened', value: notScreened, colour: NOT_SCREENED,
       from: screenedDeg, to: 360 },
   ];
+
+  let cursor = 0;
+  const ageSlices = (hasAge ? age.bands : []).map((b, i) => {
+    const from = cursor;
+    cursor += (b.value / ageTotal) * 360;
+    return { key: b.band, label: b.label, value: b.value,
+             colour: AGE_RAMP[i % AGE_RAMP.length], from, to: cursor };
+  });
 
   return (
     <>
@@ -183,19 +216,29 @@ export default function TbScreening() {
       ) : (
         <div className="d-flex items-center gap-4 flex-wrap" style={{ marginTop: '.875rem' }}>
           <svg width={S} height={S} viewBox={`0 0 ${S} ${S}`} style={{ flex: 'none' }} role="img"
-            aria-label={`${rate}% of ${nf(attendance)} attendances screened for TB, ${data.periodLabel}`}>
+            aria-label={`${rate}% of ${nf(attendance)} attendances screened for TB over ${data.periodLabel}, with the 105:01 age profile of attendance on the outer ring`}>
+            {ageSlices.map((a) => (
+              a.to - a.from <= 0 ? null : (
+                <path key={`age-${a.key}`} d={arc(C, C, OUTER_R, OUTER_RI, a.from, a.to)}
+                  fill={a.colour} stroke="#fff" strokeWidth="2"
+                  opacity={hover === null || hover === `age-${a.key}` ? 1 : 0.55}
+                  onMouseEnter={() => setHover(`age-${a.key}`)} onMouseLeave={() => setHover(null)}>
+                  <title>{`${a.label}: ${nf(a.value)}`}</title>
+                </path>
+              )
+            ))}
             {slices.map((s) => (
               s.to - s.from <= 0 ? null : (
-                <path key={s.key} d={arc(C, C, R, RI, s.from, s.to)} fill={s.colour}
+                <path key={s.key} d={arc(C, C, INNER_R, INNER_RI, s.from, s.to)} fill={s.colour}
                   stroke="#fff" strokeWidth="2"
                   opacity={hover === null || hover === s.key ? 1 : 0.55}
                   onMouseEnter={() => setHover(s.key)} onMouseLeave={() => setHover(null)} />
               )
             ))}
-            <text x={C} y={C - 2} textAnchor="middle" fontSize="26" fontWeight="700" fill="#111827">
+            <text x={C} y={C - 2} textAnchor="middle" fontSize="24" fontWeight="700" fill="#111827">
               {rate === null ? '-' : `${Math.round(rate)}%`}
             </text>
-            <text x={C} y={C + 18} textAnchor="middle" fontSize="11" fill="#374151">screened</text>
+            <text x={C} y={C + 16} textAnchor="middle" fontSize="11" fill="#374151">screened</text>
           </svg>
 
           <div style={{ minWidth: 0, flex: 1 }}>
@@ -214,6 +257,36 @@ export default function TbScreening() {
               <span className="fw-medium">Total attendance</span>
               <span className="ms-auto fw-bold">{nf(attendance)}</span>
             </div>
+            {hasAge && (
+              <div style={{ marginTop: '.625rem', paddingTop: '.4375rem',
+                borderTop: '1px solid rgba(4,32,69,.1)' }}>
+                <div className="page-pretitle" style={{ marginBottom: '.25rem' }}>
+                  Attendance by age · 105:01 · {age.periodLabel}
+                </div>
+                {ageSlices.map((a) => (
+                  <div key={a.key} className="d-flex items-center gap-2"
+                    style={{ padding: '.1875rem 0', fontSize: '.75rem' }}
+                    onMouseEnter={() => setHover(`age-${a.key}`)} onMouseLeave={() => setHover(null)}>
+                    <span style={{ width: 10, height: 10, borderRadius: 3,
+                      background: a.colour, flex: 'none' }} />
+                    <span style={{ color: 'var(--tblr-body-color)' }}>{a.label}</span>
+                    <span className="ms-auto fw-medium">{nf(a.value)}</span>
+                  </div>
+                ))}
+                {age.unclassified > 0 && (
+                  <div className="stat-foot">
+                    {nf(age.unclassified)} in a disaggregation this build does not recognise
+                  </div>
+                )}
+                {/* The two rings are different returns, so their totals differ.
+                    Saying it beats letting a reader infer a subdivision that
+                    does not exist. */}
+                <div className="stat-foot">
+                  Outer ring totals {nf(ageTotal)} from 105:01; the inner ring is 033B.
+                  Two returns, so the totals differ.
+                </div>
+              </div>
+            )}
             <div className="stat-foot">
               {data.periodLabel} · {data.orgUnit.name}
               {data.weeksReported < data.weeksElapsed && (

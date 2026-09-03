@@ -55,6 +55,9 @@ REGION_LEVEL = int(os.environ.get("DHIS2_REGION_LEVEL", "2"))
 
 SCOPES = ("facility", "region", "national")
 
+MONTH_NAMES = ["January", "February", "March", "April", "May", "June",
+               "July", "August", "September", "October", "November", "December"]
+
 # District boundaries change when the Ministry creates a district, which is a
 # handful of times a decade. They are also the largest thing this module
 # returns, so they get their own long-lived cache rather than the 60 seconds
@@ -210,13 +213,21 @@ def _num(v):
         return None
 
 
-def query(dx, ou, pe, session=None, extra=None) -> dict:
-    """One analytics request. Returns {'rows': [...], 'names': {uid: name}}."""
+def query(dx, ou, pe, session=None, extra=None, co=False) -> dict:
+    """One analytics request. Returns {'rows': [...], 'names': {uid: name}}.
+
+    `co` adds the category option combo as a dimension, which is how a total is
+    broken out by its disaggregation - age band and sex, for the OPD elements.
+    Without it analytics returns the element already summed across every combo.
+    """
     dx = [d for d in (dx or []) if d]
     if not dx:
         return {"rows": [], "names": {}}
+    dims = [f"dx:{';'.join(dx)}", f"pe:{pe}", f"ou:{ou}"]
+    if co:
+        dims.append("co")
     params = {
-        "dimension": [f"dx:{';'.join(dx)}", f"pe:{pe}", f"ou:{ou}"],
+        "dimension": dims,
         "skipMeta": "false",
         "displayProperty": "NAME",
     }
@@ -759,6 +770,92 @@ def _pick(chosen: str, options: list, what: str):
     return options[0] if options else None
 
 
+# The outer ring of the screening figure: 105:01 attendance by age band,
+# cumulative from January.
+#
+# 105:01 is MONTHLY, so its year to date is months 1 to the current month, while
+# the inner ring's 033B total is weeks 1 to the current week. The two totals
+# come from different returns and will not agree; each ring is therefore its own
+# whole, and the card says so rather than implying the outer ring subdivides the
+# inner one.
+#
+# Age comes from the category option combo. Analytics returns an element already
+# summed across its disaggregation unless `co` is asked for; with it, each row
+# carries a combo, and metadata.py's OPD_AGE_SEX table maps a combo to a name
+# like "29Dys-4Yrs, Male", whose part before the comma is the band. Sexes are
+# folded together because the ring is an age profile, not a sex one.
+
+AGE_BAND_ORDER = ["0-28Dys", "29Dys-4Yrs", "5-9Yrs", "10-19Yrs", "20+Yrs"]
+AGE_BAND_LABEL = {
+    "0-28Dys": "0 to 28 days",
+    "29Dys-4Yrs": "29 days to 4 years",
+    "5-9Yrs": "5 to 9 years",
+    "10-19Yrs": "10 to 19 years",
+    "20+Yrs": "20 years and over",
+}
+
+
+def _age_band_of_combo() -> dict:
+    """Category option combo uid -> age band, from the embedded OPD table."""
+    combos = (mapping().get("categoryCombos", {}).get("OPD_AGE_SEX") or {}).get("cocs") or {}
+    out = {}
+    for name, uid in combos.items():
+        band = str(name).split(",")[0].strip()
+        if band:
+            out[uid] = band
+    return out
+
+
+def attendance_by_age(scope: str = "facility", year: int = None, session=None) -> dict:
+    """105:01 attendance by age band, months 1 to the current month."""
+    index = mapping().get("HMIS105_01_codeIndex") or {}
+    ids = [index[c] for c in ("OA01", "OA02") if index.get(c)]
+    bands = _age_band_of_combo()
+    if not ids or not bands:
+        return {"available": False, "bands": [], "total": 0, "monthsCovered": 0,
+                "throughMonth": 0, "unclassified": 0}
+
+    today = date.today()
+    year = int(year or today.year)
+    through = today.month if year == today.year else 12
+    periods_list = [f"{year}{m:02d}" for m in range(1, through + 1)]
+
+    h = hierarchy(session=session)
+    ou = h[scope]
+    res = query(ids, ou["id"], ";".join(periods_list), session=session, co=True)
+
+    totals = {b: 0.0 for b in AGE_BAND_ORDER}
+    unclassified = 0.0
+    months = set()
+    for row in res["rows"]:
+        v = _num(row.get("value"))
+        if v is None:
+            continue
+        band = bands.get(row.get("co"))
+        if band in totals:
+            totals[band] += v
+        else:
+            # A combo the embedded table does not know is counted and named
+            # rather than dropped, so a form revision shows up as a number that
+            # does not fit instead of a quietly smaller total.
+            unclassified += v
+        if row.get("pe"):
+            months.add(row["pe"])
+
+    total = sum(totals.values()) + unclassified
+    return {
+        "available": True,
+        "year": year,
+        "throughMonth": through,
+        "monthsCovered": len(months),
+        "periodLabel": f"January to {MONTH_NAMES[through - 1]} {year}",
+        "total": int(total),
+        "unclassified": int(unclassified),
+        "bands": [{"band": b, "label": AGE_BAND_LABEL[b], "value": int(totals[b])}
+                  for b in AGE_BAND_ORDER],
+    }
+
+
 def tb_screening(scope: str = "facility", year: int = None, attendance: str = "",
                  screened: str = "", session=None) -> dict:
     scope = (scope or "facility").lower()
@@ -803,6 +900,17 @@ def tb_screening(scope: str = "facility", year: int = None, attendance: str = ""
     h = hierarchy(session=session)
     ou = h[scope]
     base["orgUnit"] = {"id": ou["id"], "name": ou["name"]}
+
+    # The outer ring is independent of which 033B element was chosen, so it is
+    # fetched either way: an age profile is still worth drawing while the inner
+    # ring waits for someone to pick a series.
+    try:
+        base["ageProfile"] = attendance_by_age(scope=scope, year=year, session=session)
+    except Exception:
+        # The outer ring is an addition, not the point of the card. If 105:01
+        # cannot be read, the screening split still draws.
+        base["ageProfile"] = {"available": False, "bands": [], "total": 0,
+                              "monthsCovered": 0, "throughMonth": 0, "unclassified": 0}
 
     if base["needsChoice"]:
         # A figure drawn from an element nobody confirmed would look exactly as
