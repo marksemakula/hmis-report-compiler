@@ -454,11 +454,34 @@ export default function Workflow() {
       {step === 3 && pushResult && (
         <div className="card">
           <h2>Submission outcome</h2>
+          {/* A submission that writes nothing is not a failed submission. When
+              every figure is already on the server DHIS2 counts them all as
+              ignored, and the API reads the period back to say so plainly, so
+              the note below is worth showing on success as well as failure. */}
           <div className={`alert ${pushResult.push_status === 'PUSHED' ? 'success' : 'error'}`}>
             {pushResult.push_status === 'PUSHED'
               ? 'The report was accepted by the national DHIS2 instance.'
               : `Submission failed: ${pushResult.result?.description || 'see details below'}`}
+            {pushResult.push_status === 'PUSHED' && pushResult.result?.description
+              && !/^import process completed/i.test(pushResult.result.description) && (
+              <div style={{ marginTop: 8 }}>{pushResult.result.description}</div>
+            )}
           </div>
+          {pushResult.result?.verification?.unaccounted > 0 && (
+            <table>
+              <thead><tr><th>Data element</th><th>Sent</th><th>On the server</th></tr></thead>
+              <tbody>
+                {[...(pushResult.result.verification.differing || []),
+                  ...(pushResult.result.verification.missing || [])].slice(0, 20).map((v, i) => (
+                  <tr key={i}>
+                    <td>{v.dataElementName || v.dataElement}</td>
+                    <td style={{ textAlign: 'right' }}>{v.value}</td>
+                    <td style={{ textAlign: 'right' }}>{v.onServer ?? 'nothing'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
           <div className="kpis">
             {['imported', 'updated', 'ignored', 'deleted'].map((k) => (
               <div className="kpi" key={k}>

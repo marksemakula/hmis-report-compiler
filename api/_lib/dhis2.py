@@ -177,6 +177,104 @@ def build_payload(report_type: str, period: str, data_values: list, org_unit: st
     return payload
 
 
+def _same_number(a, b) -> bool:
+    """'7' and '7.0' are the same figure. String equality first, because the
+    values this app sends are already whole numbers written as text."""
+    if a == b:
+        return True
+    try:
+        return float(a) == float(b)
+    except (TypeError, ValueError):
+        return False
+
+
+def stored_values(payload: dict, session=None) -> dict:
+    """What the server holds right now for this data set, period and org unit,
+    keyed (dataElement, categoryOptionCombo) -> value.
+
+    Restricted to the attributeOptionCombo the payload was filed under: another
+    attribute option is a different report about the same period."""
+    s = session or _session()
+    r = s.get(f"{base_url()}/api/dataValueSets.json",
+              params={"dataSet": payload["dataSet"], "period": payload["period"],
+                      "orgUnit": payload["orgUnit"]},
+              timeout=60)
+    r.raise_for_status()
+    aoc = payload.get("attributeOptionCombo")
+    held = {}
+    for v in r.json().get("dataValues") or []:
+        if aoc and v.get("attributeOptionCombo") not in (None, aoc):
+            continue
+        held[(v.get("dataElement"), v.get("categoryOptionCombo"))] = str(v.get("value", "")).strip()
+    return held
+
+
+def _names() -> tuple:
+    """(data element id -> name, category option combo id -> name).
+
+    A verification report that says 'LiSyn6bblsc is missing' tells the reader
+    nothing; the same line naming Diarrhoea, 20+Yrs Female, can be acted on."""
+    m = mapping()
+    elements = {}
+    for des in (m.get("dataElements") or {}).values():
+        for deid, info in (des or {}).items():
+            elements[deid] = (info or {}).get("name") or deid
+    combos = {}
+    for cc in (m.get("categoryCombos") or {}).values():
+        for name, coc_id in ((cc or {}).get("cocs") or {}).items():
+            combos[coc_id] = name
+    return elements, combos
+
+
+def verify_stored(payload: dict, session=None) -> dict:
+    """Read the period back and compare it against what was sent.
+
+    Import counts cannot answer the question a data manager actually has, which
+    is whether the figures are on the server. DHIS2 counts a value it already
+    holds unchanged as 'ignored', and by count alone that is indistinguishable
+    from a value it declined to store.
+
+    Measured on the live instance, 3 September 2026: July 2026 105:01 for Jinja
+    was compiled to 325 values and submitted three times. The first wrote all
+    322 it then contained. The second reported imported=3, updated=25,
+    ignored=297. The third reported imported=0, updated=0, ignored=325, no
+    conflicts, status SUCCESS - and reading the period back showed every one of
+    the 325 on the server with the figure that had been sent. The app called
+    that a failed submission. It was a report that had nothing left to say."""
+    held = stored_values(payload, session=session)
+    elements, combos = _names()
+    matching, zeros_dropped, missing, differing = 0, 0, [], []
+    for raw in payload.get("dataValues") or []:
+        v = {**raw,
+             "dataElementName": elements.get(raw.get("dataElement"), raw.get("dataElement")),
+             "categoryOptionComboName": combos.get(raw.get("categoryOptionCombo"),
+                                                   raw.get("categoryOptionCombo"))}
+        sent_value = str(v.get("value", "")).strip()
+        got = held.get((v.get("dataElement"), v.get("categoryOptionCombo")))
+        if got is None:
+            # A zero is not missing. zeroIsSignificant is false on 3,247 of the
+            # 3,252 elements across these data sets, so the server keeps nothing
+            # and the absent cell IS the zero.
+            if sent_value == "0":
+                zeros_dropped += 1
+            else:
+                missing.append(v)
+        elif _same_number(got, sent_value):
+            matching += 1
+        else:
+            differing.append({**v, "onServer": got})
+    return {
+        "checked": len(payload.get("dataValues") or []),
+        "matching": matching,
+        "zerosDropped": zeros_dropped,
+        "missingCount": len(missing),
+        "differingCount": len(differing),
+        "missing": missing[:10],
+        "differing": differing[:10],
+        "unaccounted": len(missing) + len(differing),
+    }
+
+
 def submit(payload: dict, max_retries: int = 3, dry_run: bool = False):
     """POST the dataValueSet with retry and exponential back-off.
 
@@ -206,39 +304,83 @@ def submit(payload: dict, max_retries: int = 3, dry_run: bool = False):
                 updated = int(counts.get("updated", 0) or 0)
                 ignored = int(counts.get("ignored", 0) or 0)
                 conflicts = summary.get("conflicts", [])[:50]
-                # DHIS2 reports status SUCCESS even when every value is ignored,
-                # so success must be judged on the import counts, not the status flag.
-                accepted = summary.get("status") in ("SUCCESS", "OK", "WARNING") and (imported + updated) > 0
                 description = summary.get("description", "")
                 sent = len(payload.get("dataValues") or [])
+                wrote = imported + updated
                 zeros = sum(1 for v in (payload.get("dataValues") or [])
                             if str(v.get("value", "")).strip() == "0")
+                status_ok = summary.get("status") in ("SUCCESS", "OK", "WARNING")
 
-                if not accepted and sent:
-                    reasons = "; ".join(f"{c.get('object', '?')}: {c.get('value', '?')}" for c in conflicts[:5])
-                    if zeros == sent:
-                        # Every value was a zero. This instance stores none of
-                        # them, so nothing written is the CORRECT outcome rather
-                        # than a failure, and saying "ignored" would be wrong -
-                        # DHIS2 reports neither imported nor ignored for a
-                        # discarded zero, which is how this looked like silence.
-                        description = (
-                            f"All {sent} values were zeros, and this instance does not store "
-                            "them: zeroIsSignificant is false on almost every element, so an "
-                            "absent cell IS the zero. Nothing was written, and nothing needed "
-                            "to be. The figures remain correct on the form and in the preview.")
-                    elif ignored > 0:
-                        description = (
-                            f"DHIS2 accepted the request but ignored all {ignored} value(s) - nothing was written. "
-                            f"{('Conflicts: ' + reasons) if reasons else 'No conflict details returned; check that the data set is assigned to the org unit, the period is open, and your user has data capture rights for it.'}"
-                        )
-                    else:
-                        description = (
-                            f"DHIS2 stored none of the {sent} values sent and reported no "
-                            "conflicts. "
-                            + (f"{zeros} of them were zeros, which this instance discards. " if zeros else "")
-                            + "Check that the data set is assigned to the org unit, the period "
-                              "is open, and your user has data capture rights for it.")
+                # DHIS2 reports SUCCESS whatever the counts, so the old test for
+                # success was imported + updated > 0. That test calls a report
+                # with nothing left to change a failure: it writes nothing
+                # because the server already holds every figure. When there is a
+                # shortfall and no conflicts, ask the server what it holds
+                # rather than inferring it from counts that cannot distinguish
+                # "already correct" from "refused".
+                verification, verify_failed = None, None
+                if sent and wrote < sent and not conflicts:
+                    try:
+                        verification = verify_stored(payload, session=s)
+                    except Exception as exc:     # noqa: BLE001
+                        # The write has already happened by this point. A fault
+                        # in the read-back is a lost diagnosis, never a lost
+                        # submission, so it must not propagate. The type alone
+                        # is recorded: an exception message can carry a URL or
+                        # a token and this value is stored and displayed.
+                        verification, verify_failed = None, type(exc).__name__
+                reflected = bool(verification) and verification["unaccounted"] == 0
+                accepted = status_ok and (wrote > 0 or reflected)
+
+                if verification and reflected:
+                    # The read-back cannot tell a value written a second ago
+                    # from one that was already there, so the count DHIS2 gives
+                    # for this import is what separates them.
+                    already = max(verification["matching"] - wrote, 0)
+                    parts = []
+                    if imported and updated:
+                        parts.append(f"{imported} written and {updated} updated just now")
+                    elif imported:
+                        parts.append(f"{imported} written just now")
+                    elif updated:
+                        parts.append(f"{updated} updated just now")
+                    if already:
+                        parts.append(f"{already} already held with the same figure")
+                    if verification["zerosDropped"]:
+                        parts.append(f"{verification['zerosDropped']} measured zero(s), "
+                                     "which this instance does not store because an "
+                                     "absent cell IS the zero")
+                    description = (
+                        f"All {sent} values are accounted for: " + "; ".join(parts) +
+                        ". The period was read back from DHIS2 after submitting, so this "
+                        "is what the national instance holds rather than an inference "
+                        "from the import counts.")
+                elif verification and verification["unaccounted"]:
+                    description = (
+                        f"DHIS2 reported no conflict, but reading the period back shows "
+                        f"{verification['unaccounted']} of the {sent} values are not on the "
+                        f"server: {verification['missingCount']} absent and "
+                        f"{verification['differingCount']} holding a different figure. Check "
+                        "that the data set is assigned to the org unit, the period is open, "
+                        "and your user has data capture rights for it.")
+                elif not accepted and sent:
+                    # The read-back could not be made, so the counts are all
+                    # there is to go on. Say so rather than diagnosing blind.
+                    reasons = "; ".join(f"{c.get('object', '?')}: {c.get('value', '?')}"
+                                        for c in conflicts[:5])
+                    description = (
+                        f"DHIS2 stored none of the {sent} values sent"
+                        + (f" and ignored {ignored}" if ignored else "")
+                        + ". "
+                        + (f"Conflicts: {reasons}. " if reasons else "")
+                        + (f"{zeros} of them were zeros, which this instance discards. "
+                           if zeros else "")
+                        + "The period could not be read back to check what the server "
+                        + (f"holds ({verify_failed}), " if verify_failed else "holds, ")
+                        + "so this may be a report with nothing left to change rather "
+                          "than a rejection. Check that the data set is assigned to the "
+                          "org unit, the period is open, and your user has data capture "
+                          "rights for it.")
                 # A PARTIAL shortfall needs explaining too, and its commonest
                 # cause is not an error at all. DHIS2 discards a zero for any
                 # element with zeroIsSignificant false, which is 3,247 of the
@@ -268,6 +410,10 @@ def submit(payload: dict, max_retries: int = 3, dry_run: bool = False):
                     "zerosSent": zeros,
                     "conflicts": conflicts,
                     "description": description,
+                    # Present only when the counts left a question to answer.
+                    # Kept in the stored push response so a submission can be
+                    # audited later without re-querying the national instance.
+                    "verification": verification,
                 }
             if r.status_code in (401, 403):
                 return {"httpStatus": r.status_code, "status": "ERROR",

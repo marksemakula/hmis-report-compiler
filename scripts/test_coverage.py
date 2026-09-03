@@ -300,9 +300,15 @@ print("\nA partial import must explain itself, not just report a shortfall")
 import types  # noqa: E402
 
 
-def _fake_submit(imported, sent, zeros):
-    """Drive dhis2.submit's response handling without a network."""
-    payload = {"dataValues": [{"dataElement": f"de{i}", "categoryOptionCombo": "c",
+def _fake_submit(imported, sent, zeros, ignored=0, held="sent", readback=True):
+    """Drive dhis2.submit's response handling without a network.
+
+    `held` says what the server reports when the period is read back: "sent"
+    means it holds exactly what was submitted, "none" that it holds nothing.
+    `readback` False removes the GET altogether, standing for a network fault
+    during verification."""
+    payload = {"dataSet": "ds", "period": "202607", "orgUnit": "ou",
+               "dataValues": [{"dataElement": f"de{i}", "categoryOptionCombo": "c",
                                "value": "0" if i < zeros else str(i + 1)}
                               for i in range(sent)]}
 
@@ -312,17 +318,38 @@ def _fake_submit(imported, sent, zeros):
         @staticmethod
         def json():
             return {"status": "SUCCESS",
-                    "importCount": {"imported": imported, "updated": 0, "ignored": 0, "deleted": 0},
+                    "importCount": {"imported": imported, "updated": 0,
+                                    "ignored": ignored, "deleted": 0},
                     "conflicts": []}
         text = ""
 
+    class G:
+        status_code = 200
+
+        @staticmethod
+        def raise_for_status():
+            return None
+
+        @staticmethod
+        def json():
+            if held == "none":
+                return {"dataValues": []}
+            # The server holds every non-zero value that was sent. A zero is
+            # never held: this instance discards it.
+            return {"dataValues": [
+                {"dataElement": v["dataElement"], "categoryOptionCombo": "c",
+                 "value": v["value"]}
+                for v in payload["dataValues"] if v["value"] != "0"]}
+
     sess = types.SimpleNamespace(post=lambda *a, **k: R())
+    if readback:
+        sess.get = lambda *a, **k: G()
     dhis2._session = lambda: sess
     dhis2.resolve_attribute_option_combo = lambda *a, **k: None
     return dhis2.submit(payload)
 
 
-res = _fake_submit(imported=6, sent=11, zeros=5)
+res = _fake_submit(imported=6, sent=11, zeros=5, readback=False)
 check("a shortfall is reported honestly as accepted", res["accepted"], True)
 check("it says how many of how many were stored",
       "stored 6 of the 11" in res["description"], True)
@@ -334,17 +361,56 @@ check("the counts are carried for the UI",
 
 full = _fake_submit(imported=11, sent=11, zeros=0)
 check("a complete import says nothing extra", full["description"], "")
-# The observed shape for a discarded zero is imported=0 AND ignored=0, which
-# is why this looked like silence: neither branch of the old check fired.
-all_zero = _fake_submit(imported=0, sent=11, zeros=11)
-check("an all-zero push is not accepted", all_zero["accepted"], False)
-check("...but is explained as correct rather than as a failure",
-      "nothing needed to be" in all_zero["description"], True)
-check("...and does not accuse DHIS2 of ignoring anything",
-      "ignored all" in all_zero["description"], False)
+check("...and asks the server nothing it need not ask", full["verification"], None)
 
-nothing = _fake_submit(imported=0, sent=11, zeros=0)
-check("nothing stored with no zeros and no conflicts still explains itself",
+nothing = _fake_submit(imported=0, sent=11, zeros=0, readback=False)
+check("nothing stored, with the read-back unavailable, still explains itself",
       "stored none of the 11" in nothing["description"], True)
-check("...and says what to check",
+check("...names the fault rather than hiding it",
+      "could not be read back" in nothing["description"], True)
+check("...allows that it may be a report with nothing left to change",
+      "nothing left to change" in nothing["description"], True)
+check("...and still says what to check",
       "data capture rights" in nothing["description"], True)
+
+print("\nA submission that writes nothing is not a failed submission")
+# July 2026, submitted a third time on 3 September 2026: 325 values sent,
+# imported=0, updated=0, ignored=325, no conflicts, status SUCCESS. Every one
+# was already on the server with the figure sent. The app called that
+# "Submission failed: DHIS2 accepted the request but ignored all 325 value(s)".
+unchanged = _fake_submit(imported=0, sent=325, zeros=0, ignored=325)
+check("a re-submission of identical figures is accepted", unchanged["accepted"], True)
+check("...because the period was read back", unchanged["verification"]["matching"], 325)
+check("...with nothing unaccounted for", unchanged["verification"]["unaccounted"], 0)
+check("...and it says the server already held them",
+      "325 already held with the same figure" in unchanged["description"], True)
+check("...naming the read-back as the evidence",
+      "read back from DHIS2" in unchanged["description"], True)
+check("...and never accuses DHIS2 of ignoring the report",
+      "ignored all" in unchanged["description"], False)
+
+# The mixed case, which is what a corrected report looks like: a few new
+# figures, a few changed, the rest untouched since the last submission.
+mixed = _fake_submit(imported=3, sent=325, zeros=0, ignored=297)
+check("a partly-changed report is accepted", mixed["accepted"], True)
+check("...and separates what was written from what was already there",
+      "3 written just now; 322 already held" in mixed["description"], True)
+
+# The observed shape for a discarded zero is imported=0 AND ignored=0, which
+# is why an all-zero push once looked like silence.
+all_zero = _fake_submit(imported=0, sent=11, zeros=11)
+check("an all-zero push is accepted, because nothing was owed to the server",
+      all_zero["accepted"], True)
+check("...counted as zeros rather than as missing values",
+      all_zero["verification"]["zerosDropped"], 11)
+check("...and explained as correct rather than as a failure",
+      "absent cell IS the zero" in all_zero["description"], True)
+
+# A real failure must still read as one, and now it can be shown rather than
+# guessed at: the server is asked, and it holds nothing.
+lost = _fake_submit(imported=0, sent=11, zeros=0, ignored=11, held="none")
+check("values that never arrived are not called accepted", lost["accepted"], False)
+check("...and are counted", lost["verification"]["missingCount"], 11)
+check("...and named as absent from the server",
+      "11 of the 11 values are not on the server" in lost["description"], True)
+check("...with the rows carried for display", len(lost["verification"]["missing"]), 10)
