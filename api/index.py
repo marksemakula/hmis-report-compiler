@@ -450,6 +450,61 @@ def dashboard_overview(scope: str = "region", user: dict = Depends(current_user)
         err(f"The {scope} figures could not be read: {type(exc).__name__}", 502)
 
 
+# ---------------- the district map ----------------
+#
+# Three literal paths under /api/py/map/, none parameterised, so nothing here
+# can shadow anything. Geometry is split from values deliberately: the outlines
+# are large and change when a district is created, the values change with every
+# turn of a filter, and sending both on every filter change would push a
+# quarter of a megabyte down a hospital line to recolour ten shapes.
+
+@app.get("/api/py/map/geometry")
+def map_geometry(user: dict = Depends(current_user)):
+    """District outlines for the region, from DHIS2's own organisation unit
+    geometry - the same source the DHIS2 Maps app draws from."""
+    try:
+        return analytics.districts()
+    except RuntimeError:
+        raise
+    except requests.HTTPError as exc:
+        err(f"DHIS2 rejected the district listing: {exc}", 502)
+    except Exception as exc:
+        err(f"The district outlines could not be read: {type(exc).__name__}", 502)
+
+
+@app.get("/api/py/map/indicators")
+def map_indicator_list(user: dict = Depends(current_user)):
+    """What the map can be coloured by, and the periods available for each
+    cadence. Derived from the registry, so it cannot drift from what the
+    compiler and the submission path use."""
+    try:
+        return {
+            "groups": analytics.map_indicators(),
+            "periods": {
+                "Monthly": analytics.recent_periods("Monthly", 12),
+                "Weekly": analytics.recent_periods("Weekly", 12),
+                "Quarterly": analytics.recent_periods("Quarterly", 8),
+            },
+        }
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        err(f"The indicator list could not be built: {type(exc).__name__}", 502)
+
+
+@app.get("/api/py/map/values")
+def map_value_lookup(indicator: str, period: str, user: dict = Depends(current_user)):
+    """One value per district, for one indicator and one period."""
+    try:
+        return analytics.map_values(indicator, period)
+    except RuntimeError:
+        raise
+    except requests.HTTPError as exc:
+        err(f"DHIS2 rejected the analytics request: {exc}", 502)
+    except Exception as exc:
+        err(f"The district figures could not be read: {type(exc).__name__}", 502)
+
+
 # ---------------- audit ----------------
 
 @app.get("/api/py/audit")

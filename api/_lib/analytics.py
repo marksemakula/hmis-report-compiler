@@ -32,7 +32,9 @@ as a rate above 100. The data sets are therefore grouped by periodType and each
 group is asked with its own period.
 """
 import os
+import re
 import time
+from datetime import date, timedelta
 
 from .metadata import mapping
 from . import periods
@@ -51,6 +53,25 @@ _CACHE_TTL = 60.0
 REGION_LEVEL = int(os.environ.get("DHIS2_REGION_LEVEL", "2"))
 
 SCOPES = ("facility", "region", "national")
+
+# District boundaries change when the Ministry creates a district, which is a
+# handful of times a decade. They are also the largest thing this module
+# returns, so they get their own long-lived cache rather than the 60 seconds
+# the figures use.
+_GEO_CACHE = {}
+_GEO_TTL = 3600.0
+
+# Four decimal places is about 11 metres at the equator - far finer than a
+# district boundary drawn at this scale needs, and it roughly halves the
+# payload, which matters on a hospital connection.
+_COORD_DP = 4
+
+
+def district_level() -> int:
+    """Districts sit one level below regions. Overridable for an instance whose
+    hierarchy is arranged differently."""
+    override = os.environ.get("DHIS2_DISTRICT_LEVEL", "")
+    return int(override) if override else REGION_LEVEL + 1
 
 
 def _session(session=None):
@@ -88,6 +109,7 @@ def _cached(key, produce):
 def reset_cache():
     """Drop memoised analytics. Called by the admin metadata refresh."""
     _CACHE.clear()
+    _GEO_CACHE.clear()
 
 
 # --------------------------------------------------------------- hierarchy
@@ -146,6 +168,9 @@ def hierarchy(session=None) -> dict:
             "region": {**region, "scope": "region"},
             "national": {**national, "scope": "national"},
             "facilityLevel": ou.get("level") or facility.get("level") or 6,
+            # Which district this hospital sits in, so the map can mark it.
+            # Absent rather than guessed if the hierarchy is shaped otherwise.
+            "district": by_level.get(district_level()),
         }
 
     return _cached("hierarchy", produce)
@@ -398,6 +423,250 @@ def ranking(session=None, report_type: str = "OPD") -> dict:
         "stale": False,
         "facility": next((p for p in peers if p["id"] == h["facility"]["id"]), None),
         "top": peers[:5],
+    }
+
+
+# ---------------------------------------------------------------- the map
+#
+# The district outlines come from DHIS2, not from a shapefile checked in here.
+# Every organisation unit can carry a `geometry` property, and the Ministry's
+# instance already has them - that is the only reason the DHIS2 Maps app can
+# draw Busoga at all. Reading them from the same place as the figures means the
+# shapes and the numbers share organisation unit identifiers and cannot drift,
+# and a district created next year appears without anyone re-exporting a file.
+
+
+def _round_ring(ring):
+    return [[round(float(x), _COORD_DP), round(float(y), _COORD_DP)] for x, y in ring]
+
+
+def _normalise_geometry(geo):
+    """A Polygon or MultiPolygon as nested coordinate rings, or None.
+
+    Points are skipped: a facility carries one, and a dot cannot be shaded.
+    """
+    if not isinstance(geo, dict):
+        return None
+    kind = geo.get("type")
+    coords = geo.get("coordinates")
+    if not coords:
+        return None
+    try:
+        if kind == "Polygon":
+            return {"type": "Polygon", "coordinates": [_round_ring(r) for r in coords]}
+        if kind == "MultiPolygon":
+            return {"type": "MultiPolygon",
+                    "coordinates": [[_round_ring(r) for r in poly] for poly in coords]}
+    except (TypeError, ValueError):
+        return None
+    return None
+
+
+def _bbox(shapes):
+    xs, ys = [], []
+    for s in shapes:
+        rings = s["coordinates"] if s["type"] == "Polygon" else \
+            [r for poly in s["coordinates"] for r in poly]
+        for ring in rings:
+            for x, y in ring:
+                xs.append(x)
+                ys.append(y)
+    if not xs:
+        return None
+    return [min(xs), min(ys), max(xs), max(ys)]
+
+
+def districts(session=None) -> dict:
+    """The region's districts with their outlines, for the choropleth."""
+    def produce():
+        h = hierarchy(session=session)
+        s = _session(session)
+        r = s.get(f"{_base()}/api/organisationUnits.json",
+                  params={"filter": f"parent.id:eq:{h['region']['id']}",
+                          "fields": "id,name,level,geometry",
+                          "paging": "false"},
+                  timeout=60)
+        if r.status_code in (401, 403):
+            raise RuntimeError(
+                f"DHIS2 refused the organisation unit listing for {h['region']['name']} "
+                f"({r.status_code}). Set DHIS2_USERNAME and DHIS2_PASSWORD (or DHIS2_PAT) "
+                "to an account that can read the region's districts, and check the sharing "
+                "settings on those organisation units in DHIS2.")
+        r.raise_for_status()
+
+        out = []
+        without = []
+        for ou in r.json().get("organisationUnits", []):
+            raw = ou.get("geometry")
+            geo = _normalise_geometry(raw)
+            if geo is None:
+                # "No boundary in DHIS2" and "has a location but no area" are
+                # different facts. Only the first is worth telling the reader:
+                # a Point belongs to a facility, is not a district that failed
+                # to get an outline, and listing it as one would send someone
+                # looking for a boundary that was never meant to exist.
+                if not isinstance(raw, dict) or not raw.get("coordinates"):
+                    without.append(ou.get("name") or ou.get("id"))
+                continue
+            out.append({"id": ou["id"], "name": ou.get("name"), "geometry": geo})
+        out.sort(key=lambda d: (d["name"] or "").lower())
+
+        return {
+            "region": {"id": h["region"]["id"], "name": h["region"]["name"]},
+            "facilityDistrict": (h.get("district") or {}).get("id"),
+            "districts": out,
+            "bbox": _bbox([d["geometry"] for d in out]),
+            # Named rather than silently omitted: a district with no boundary
+            # in DHIS2 is missing from the map, and the reader should be told
+            # which one rather than left counting shapes.
+            "withoutGeometry": sorted(without),
+        }
+
+    hit = _GEO_CACHE.get("districts")
+    if hit and time.time() - hit[0] < _GEO_TTL:
+        return hit[1]
+    value = produce()
+    _GEO_CACHE["districts"] = (time.time(), value)
+    return value
+
+
+def recent_periods(period_type: str, count: int = 12) -> list:
+    """The last `count` closed periods of a cadence, newest first."""
+    pt = (period_type or "Monthly").capitalize()
+    today = date.today()
+    out = []
+    if pt == "Weekly":
+        d = today - timedelta(days=7)
+        for _ in range(count):
+            out.append(periods.week_period(d))
+            d -= timedelta(days=7)
+    elif pt == "Quarterly":
+        q = (today.month - 1) // 3 + 1
+        year = today.year
+        for _ in range(count):
+            q -= 1
+            if q == 0:
+                q, year = 4, year - 1
+            out.append(f"{year}Q{q}")
+    else:
+        year, month = today.year, today.month
+        for _ in range(count):
+            month -= 1
+            if month == 0:
+                month, year = 12, year - 1
+            out.append(f"{year}{month:02d}")
+    return [{"period": p, "label": periods.describe(pt, p)} for p in out]
+
+
+# The five headline elements, in the order a person reads them.
+_VOLUME = [
+    ("OA01_newAttendance", "OPD new attendance"),
+    ("OA02_reAttendance", "OPD re-attendance"),
+    ("CI02_admissions", "Admissions"),
+    ("CI03_deaths", "Deaths"),
+    ("CI04_patientDays", "Patient days"),
+]
+
+_CASE_NAME = re.compile(r"\bcases?\b", re.I)
+# '033B-CD01a. Cholera Cases' -> 'Cholera Cases'. Same prefix shapes metadata.py
+# already handles, including the elements that omit the full stop.
+_CODE_PREFIX = re.compile(r"^(105[A-Ca-c]?|106[Aa]|108|033[Bb])-[A-Za-z0-9_]+[\.\s]\s*")
+
+
+def map_indicators() -> list:
+    """What the map can be coloured by, grouped for a picker.
+
+    Built from the registry rather than a second list of its own. The
+    surveillance group in particular is derived from whatever 033B elements the
+    metadata cache holds: this application has already been bitten once by
+    mappings aimed at elements the Ministry had retired, and inventing disease
+    names here would be the same mistake. A cache with no 033B listing yields
+    no surveillance group at all, which is honest and self-correcting - an
+    admin metadata refresh fills it in.
+    """
+    m = mapping()
+    rates, ontime = [], []
+    for entry in sorted(m.get("reportTypes", {}).values(), key=lambda e: e["short"]):
+        ds = m["dataSets"].get(entry["dataSet"])
+        if not ds:
+            continue
+        rates.append({"id": f"rate:{ds['id']}", "label": f"{entry['short']} reporting rate",
+                      "unit": "%", "kind": "percent", "periodType": entry["periodType"]})
+        ontime.append({"id": f"ontime:{ds['id']}", "label": f"{entry['short']} on-time rate",
+                       "unit": "%", "kind": "percent", "periodType": entry["periodType"]})
+
+    keys = m.get("keyDataElements", {})
+    volume = [{"id": f"de:{keys[k]}", "label": label, "unit": "", "kind": "count",
+               "periodType": "Monthly"}
+              for k, label in _VOLUME if keys.get(k)]
+
+    surveillance = []
+    for deid, info in (m.get("dataElements", {}).get("HMIS033B") or {}).items():
+        name = (info or {}).get("name") or ""
+        if not _CASE_NAME.search(name):
+            continue
+        surveillance.append({"id": f"de:{deid}",
+                             "label": _CODE_PREFIX.sub("", name).strip() or name,
+                             "unit": "", "kind": "count", "periodType": "Weekly"})
+    surveillance.sort(key=lambda i: i["label"].lower())
+
+    groups = [{"group": "Reporting rate", "items": rates},
+              {"group": "On-time filing", "items": ontime}]
+    if volume:
+        groups.append({"group": "Service volume", "items": volume})
+    if surveillance:
+        groups.append({"group": "Surveillance cases", "items": surveillance})
+    return groups
+
+
+def _resolve_indicator(indicator: str):
+    """'rate:<uid>' / 'ontime:<uid>' / 'de:<uid>' -> the analytics dx item."""
+    kind, _, uid = (indicator or "").partition(":")
+    if not uid or not re.fullmatch(r"[A-Za-z][A-Za-z0-9]{10}", uid):
+        raise RuntimeError(
+            f"Unrecognised map indicator '{indicator}'. Check the indicator parameter; "
+            "it must be one of the ids returned by /api/py/map/indicators.")
+    if kind == "rate":
+        return f"{uid}.REPORTING_RATE", "percent", "%"
+    if kind == "ontime":
+        return f"{uid}.REPORTING_RATE_ON_TIME", "percent", "%"
+    if kind == "de":
+        return uid, "count", ""
+    raise RuntimeError(
+        f"Unrecognised map indicator '{indicator}'. Check the indicator parameter; "
+        "the prefix must be rate, ontime or de.")
+
+
+def map_values(indicator: str, period: str, session=None) -> dict:
+    """One value per district, for one indicator and one period."""
+    if not re.fullmatch(r"\d{4}(\d{2}|W\d{1,2}|Q[1-4])", str(period or "").upper()):
+        raise RuntimeError(
+            f"Unrecognised period '{period}'. Check the period parameter; it must be "
+            "YYYYMM, YYYYWnn or YYYYQn.")
+    dx, kind, unit = _resolve_indicator(indicator)
+    h = hierarchy(session=session)
+    res = query([dx], f"LEVEL-{district_level()};{h['region']['id']}",
+                str(period).upper(), session=session)
+
+    values = {}
+    for row in res["rows"]:
+        v = _num(row.get("value"))
+        if v is None:
+            continue
+        # Analytics can return one row per (dx, ou); summing is a no-op for a
+        # single dx and correct if a future caller passes more than one.
+        values[row.get("ou")] = values.get(row.get("ou"), 0) + v
+
+    numbers = sorted(values.values())
+    return {
+        "indicator": indicator,
+        "period": str(period).upper(),
+        "kind": kind,
+        "unit": unit,
+        "values": values,
+        "min": numbers[0] if numbers else None,
+        "max": numbers[-1] if numbers else None,
+        "reporting": len(values),
     }
 
 

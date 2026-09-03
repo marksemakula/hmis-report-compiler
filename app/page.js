@@ -4,8 +4,9 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
   IconDraft, IconCloudUp, IconInbox, IconAlert, IconCheck,
-  IconDatabase, IconPlug, IconArrowRight, IconEye, IconUpload,
+  IconArrowRight, IconEye, IconUpload,
 } from './icons';
+import DistrictMap from './districtmap';
 
 /* ---------------------------------------------------------------- periods */
 
@@ -298,19 +299,28 @@ function StatTile({ Icon, tone, label, value, foot }) {
   );
 }
 
-function HealthRow({ ok, label, detail, Icon }) {
-  return (
-    <div className="d-flex items-center gap-3" style={{ padding: '.625rem 0', borderTop: '1px solid rgba(4,32,69,.1)' }}>
-      <span className={`avatar sm soft-${ok === null ? 'primary' : ok ? 'success' : 'danger'}`}><Icon size={16} /></span>
-      <div style={{ minWidth: 0, flex: 1 }}>
-        <div className="fw-medium">{label}</div>
-        <div className="text-secondary" style={{ fontSize: '.75rem' }}>{detail}</div>
-      </div>
-      <span className={`badge ${ok === null ? 'muted' : ok ? 'ok' : 'bad'}`}>
-        {ok === null ? 'Unknown' : ok ? 'Ready' : 'Attention'}
-      </span>
-    </div>
-  );
+/**
+ * What is wrong with the plumbing, in words, or nothing at all.
+ *
+ * The standing System health panel is gone - the map has its place. But the
+ * facts it carried are the ones that explain a submission which returns
+ * SUCCESS and writes nothing, and dropping them outright would leave a Data
+ * Officer with a silent failure and nowhere to look. So they are raised only
+ * when one of them is actually wrong: invisible on a healthy morning, and in
+ * front of you on the morning it matters.
+ */
+function healthWarnings(meta, agents) {
+  const out = [];
+  if (meta && !meta.dhis2_configured) out.push('DHIS2 credentials are not configured');
+  if (meta && !meta.db_configured) out.push('the database is not configured');
+  if (meta && !meta.orgUnit?.id) out.push('the facility organisation unit is not resolved');
+  if (agents && !agents.online) {
+    const seen = agents.agents?.[0];
+    out.push(seen
+      ? `the extraction agent was last seen ${Math.round(seen.seconds_ago / 60)} min ago`
+      : 'no extraction agent has ever reported in');
+  }
+  return out;
 }
 
 const STATE = {
@@ -361,10 +371,18 @@ function FacilityView({ loading, rows, types, meta, agents, user }) {
 
   const latestByType = new Map();
   for (const r of rows) if (!latestByType.has(r.type)) latestByType.set(r.type, r);
-  const agentSeen = agents?.agents?.[0];
+  const warnings = healthWarnings(meta, agents);
 
   return (
     <>
+      {warnings.length > 0 && (
+        <div className="alert warn">
+          <strong>Check before submitting:</strong> {warnings.join('; ')}. These are the
+          commonest reasons a submission reports success yet writes nothing.
+          {user?.role === 'admin' && <> Metadata can be refreshed from <Link href="/admin">Administration</Link>.</>}
+        </div>
+      )}
+
       <div className="row-cards" style={{ marginBottom: 'var(--tblr-page-padding)' }}>
         <StatTile Icon={IconDraft} tone="primary" label="Reports compiled"
           value={loading ? '—' : nf(rows.length)}
@@ -380,7 +398,11 @@ function FacilityView({ loading, rows, types, meta, agents, user }) {
           foot={loading ? ' ' : failed.length ? `Most recent: ${formatPeriod(failed[0].period)}` : 'None recorded'} />
       </div>
 
-      <div className="grid cols-2" style={{ gridTemplateColumns: 'minmax(0, 2fr) minmax(0, 1fr)' }}>
+      {/* alignItems start, not the grid default: the map card is roughly twice
+          the height of the chart card, and stretching the chart to match it
+          leaves four hundred pixels of empty card under the axis. */}
+      <div className="grid cols-2"
+        style={{ gridTemplateColumns: 'minmax(0, 2fr) minmax(0, 1fr)', alignItems: 'start' }}>
         <div className="card flush">
           <div className="card-header">
             <div>
@@ -407,27 +429,13 @@ function FacilityView({ loading, rows, types, meta, agents, user }) {
         </div>
 
         <div className="card flush">
-          <div className="card-header"><h2 className="card-title">System health</h2></div>
-          <div className="card-body" style={{ paddingTop: 0 }}>
-            <HealthRow Icon={IconCloudUp} ok={meta ? !!meta.dhis2_configured : null}
-              label="DHIS2 credentials"
-              detail={meta?.instance ? String(meta.instance).replace(/^https?:\/\//, '') : 'National instance'} />
-            <HealthRow Icon={IconDatabase} ok={meta ? !!meta.db_configured : null}
-              label="Database" detail="Staging data, compiled reports and the audit trail" />
-            <HealthRow Icon={IconPlug} ok={agents ? !!agents.online : null}
-              label="Extraction agent"
-              detail={!agents ? 'Status unavailable'
-                : agents.online ? `${agentSeen?.host || 'Agent'} reporting in`
-                  : agentSeen ? `Last seen ${Math.round(agentSeen.seconds_ago / 60)} min ago`
-                    : 'No agent has ever reported in'} />
-            <HealthRow Icon={IconCheck} ok={meta ? !!meta.orgUnit?.id : null}
-              label="Facility"
-              detail={meta?.orgUnit?.name ? `${meta.orgUnit.name} · ${meta.orgUnit.id}` : 'Organisation unit not resolved'} />
-            <p className="text-secondary" style={{ fontSize: '.75rem', marginTop: '.75rem', marginBottom: 0 }}>
-              These four explain most submissions that return success yet write nothing.
-              {user?.role === 'admin' && <> Metadata can be refreshed from <Link href="/admin">Administration</Link>.</>}
-            </p>
+          <div className="card-header">
+            <div>
+              <h2 className="card-title">Busoga districts</h2>
+              <div className="card-subtitle">This hospital&rsquo;s district is outlined</div>
+            </div>
           </div>
+          <div className="card-body"><DistrictMap /></div>
         </div>
       </div>
 
@@ -547,17 +555,20 @@ function ScopeView({ data, error, loading, onRetry }) {
         })}
       </div>
 
-      <div className="grid cols-2" style={{ gridTemplateColumns: 'minmax(0, 2fr) minmax(0, 1fr)' }}>
+      {/* The map and the peer table share a row. Busoga is tall and narrow, so
+          a full-width map card would leave most of its own width empty; giving
+          half the row to the ranking uses the space that shape cannot. */}
+      <div className="grid cols-2" style={{ alignItems: 'start' }}>
         <div className="card flush">
           <div className="card-header">
             <div>
-              <h2 className="card-title">Reporting rate</h2>
+              <h2 className="card-title">{data.orgUnit.name} by district</h2>
               <div className="card-subtitle">
-                Monthly data sets across {data.orgUnit.name}, averaged
+                Choose what to shade the districts by, and the period to read it for
               </div>
             </div>
           </div>
-          <div className="card-body"><RateTrend points={data.trend || []} /></div>
+          <div className="card-body"><DistrictMap /></div>
         </div>
 
         <div className="card flush">
@@ -604,6 +615,18 @@ function ScopeView({ data, error, loading, onRetry }) {
             )}
           </div>
         </div>
+      </div>
+
+      <div className="card flush" style={{ marginTop: 'var(--tblr-page-padding)' }}>
+        <div className="card-header">
+          <div>
+            <h2 className="card-title">Reporting rate</h2>
+            <div className="card-subtitle">
+              Monthly data sets across {data.orgUnit.name}, averaged
+            </div>
+          </div>
+        </div>
+        <div className="card-body"><RateTrend points={data.trend || []} /></div>
       </div>
 
       {data.indicators?.some((i) => i.value !== null) && (

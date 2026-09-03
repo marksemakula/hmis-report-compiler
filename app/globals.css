@@ -824,6 +824,81 @@ tbody tr:hover td { background: rgba(var(--tblr-body-color-rgb), .02); }
   100% { transform: translateX(350%); }
 }
 
+/* ======================================================================= map
+ *
+ * A choropleth of the region's districts. The filter row sits above the map,
+ * as one row of controls, per the dashboard convention.
+ */
+
+.map-filters {
+  display: grid;
+  gap: .75rem;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  align-items: end;
+}
+.map-filters label { margin-bottom: .25rem; font-size: .75rem; color: var(--tblr-secondary); }
+
+/* The figure keeps the region's own proportions, so a tall narrow region does
+   not stretch across a wide card. Whatever width that leaves goes to the
+   legend, which sits beside the map when there is room and beneath it when
+   there is not. */
+.map-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 1.5rem;
+}
+.map-body.beside { justify-content: flex-start; }
+.map-body .map-legend { margin-top: 0; }
+.map-legend.column {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: .5rem;
+  padding-top: .5rem;
+}
+
+.map-figure { position: relative; }
+.map-figure svg { display: block; width: 100%; height: auto; }
+.map-figure path.district {
+  stroke: var(--tblr-surface);
+  stroke-width: 1;
+  stroke-linejoin: round;
+  transition: fill-opacity .15s ease-in-out;
+  cursor: default;
+}
+.map-figure path.district:hover { fill-opacity: .82; }
+/* The hospital's own district, outlined rather than recoloured - its fill
+   still has to carry its value like every other district. */
+.map-figure path.home {
+  fill: none;
+  stroke: var(--tblr-body-color);
+  stroke-width: 2;
+  pointer-events: none;
+}
+
+.map-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .75rem;
+  margin-top: .75rem;
+  font-size: .75rem;
+  color: var(--tblr-secondary);
+}
+.map-legend .swatch {
+  display: inline-flex;
+  align-items: center;
+  gap: .375rem;
+}
+.map-legend .swatch i {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  display: inline-block;
+  box-shadow: inset 0 0 0 1px var(--tblr-border-translucent);
+}
+
 /* ==================================================================== alerts */
 
 .alert {

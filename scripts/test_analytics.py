@@ -69,6 +69,30 @@ class StubSession:
 
     def get(self, url, params=None, timeout=None):
         self.calls.append((url, params or {}))
+        if url.endswith("/api/organisationUnits.json"):
+            if self.status >= 400:
+                return Response({}, self.status)
+            return Response({"organisationUnits": [
+                # A plain Polygon.
+                {"id": "dist_jinja", "name": "Jinja City", "level": 3, "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[[33.2, 0.4], [33.3, 0.4], [33.3, 0.5], [33.2, 0.5], [33.2, 0.4]]]}},
+                # A MultiPolygon, which islands in Lake Victoria genuinely need.
+                {"id": "dist_mayuge", "name": "Mayuge District", "level": 3, "geometry": {
+                    "type": "MultiPolygon",
+                    "coordinates": [[[[33.4, 0.2], [33.6, 0.2], [33.6, 0.35], [33.4, 0.35], [33.4, 0.2]]],
+                                    [[[33.55, 0.05], [33.62, 0.05], [33.62, 0.12], [33.55, 0.12], [33.55, 0.05]]]]}},
+                # Coordinates carrying more precision than a district needs.
+                {"id": "dist_kamuli", "name": "Kamuli District", "level": 3, "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[[33.10987654, 0.90123456], [33.2, 0.9], [33.2, 1.1],
+                                     [33.1, 1.1], [33.10987654, 0.90123456]]]}},
+                # No geometry at all - must be named, not silently dropped.
+                {"id": "dist_nogeo", "name": "Bugweri District", "level": 3},
+                # A point, which cannot be shaded and must be skipped.
+                {"id": "dist_point", "name": "A Facility", "level": 6,
+                 "geometry": {"type": "Point", "coordinates": [33.2, 0.44]}},
+            ]})
         if "/organisationUnits/" in url:
             return Response({
                 "id": FACILITY, "name": "Jinja Regional Referral Hospital", "level": 6,
@@ -297,6 +321,139 @@ except RuntimeError as exc:
     check("a 403 raises RuntimeError", True, True)
     check("...and says it is about read sharing", "data-read sharing" in msg, True)
     check("...and names the variables to change", "DHIS2_USERNAME" in msg, True)
+
+# --------------------------------------------------------------------- map
+
+print("\nDistrict outlines come from DHIS2, not from a checked-in shapefile")
+s = fresh()
+geo = analytics.districts(session=s)
+ou_call = [p for u, p in s.calls if u.endswith("/api/organisationUnits.json")][0]
+check("districts are the region's own children",
+      ou_call["filter"], f"parent.id:eq:{REGION}")
+check("geometry is asked for", "geometry" in ou_call["fields"], True)
+check("paging is off, so a region is never truncated", ou_call["paging"], "false")
+
+names = [d["name"] for d in geo["districts"]]
+check("only shadeable shapes are kept",
+      names, ["Jinja City", "Kamuli District", "Mayuge District"])
+check("a Point is skipped rather than drawn", "A Facility" in names, False)
+check("a district with no boundary is named, not silently dropped",
+      geo["withoutGeometry"], ["Bugweri District"])
+
+kinds = {d["name"]: d["geometry"]["type"] for d in geo["districts"]}
+check("a Polygon survives as a Polygon", kinds["Jinja City"], "Polygon")
+check("a MultiPolygon survives as a MultiPolygon", kinds["Mayuge District"], "MultiPolygon")
+check("both islands of the MultiPolygon are kept",
+      len([d for d in geo["districts"] if d["name"] == "Mayuge District"][0]["geometry"]["coordinates"]), 2)
+
+kamuli = [d for d in geo["districts"] if d["name"] == "Kamuli District"][0]
+check("coordinates are rounded to district precision",
+      kamuli["geometry"]["coordinates"][0][0], [33.1099, 0.9012])
+
+check("the bounding box spans every shape", geo["bbox"], [33.1, 0.05, 33.62, 1.1])
+check("the hospital's own district is named so the map can mark it",
+      geo["facilityDistrict"], "dist01")
+
+print("\nOutlines are cached far longer than the figures")
+before = len([u for u, _ in s.calls if u.endswith("/api/organisationUnits.json")])
+analytics.districts(session=s)
+check("a second call re-uses them",
+      len([u for u, _ in s.calls if u.endswith("/api/organisationUnits.json")]), before)
+
+print("\nThe indicator catalogue is derived from the registry")
+groups = {g["group"]: g["items"] for g in analytics.map_indicators()}
+check("reporting rate is offered per data set", len(groups["Reporting rate"]), 8)
+check("so is on-time filing", len(groups["On-time filing"]), 8)
+check("service volume comes from keyDataElements", len(groups["Service volume"]), 5)
+check("a rate is a percentage", groups["Reporting rate"][0]["unit"], "%")
+check("a volume figure is a count", groups["Service volume"][0]["kind"], "count")
+check("each item carries the cadence its periods must come from",
+      sorted({i["periodType"] for i in groups["Reporting rate"]}),
+      ["Monthly", "Quarterly", "Weekly"])
+# The cache in this fixture has no 033B listing, exactly as a deployment that
+# has not refreshed metadata since 033B was added. Inventing disease names to
+# fill the gap is the mistake this project has already made once.
+check("no surveillance group is invented when 033B is not cached",
+      "Surveillance cases" in groups, False)
+
+print("\n...and grows a surveillance group when 033B metadata arrives")
+metadata._MAPPING["dataElements"] = {"HMIS033B": {
+    "de033bchol": {"name": "033B-CD01a. Cholera Cases"},
+    "de033bmeas": {"name": "033B-CD02. Measles Cases"},
+    "de033bdead": {"name": "033B-CD01b. Cholera Deaths"},
+    "de033bgene": {"name": "033B-ST04. GeneXpert modules working"},
+}}
+groups = {g["group"]: g["items"] for g in analytics.map_indicators()}
+surv = groups.get("Surveillance cases", [])
+check("only case counts are offered", [i["label"] for i in surv],
+      ["Cholera Cases", "Measles Cases"])
+check("the HMIS code prefix is stripped for reading",
+      surv[0]["label"].startswith("033B-"), False)
+check("deaths and equipment are not offered as cases",
+      any("Deaths" in i["label"] or "GeneXpert" in i["label"] for i in surv), False)
+check("surveillance is weekly", surv[0]["periodType"], "Weekly")
+metadata._MAPPING["dataElements"] = {}
+
+print("\nPeriods are offered per cadence, newest first")
+months = analytics.recent_periods("Monthly", 12)
+check("twelve months", len(months), 12)
+check("each is YYYYMM", all(len(p["period"]) == 6 and p["period"].isdigit() for p in months), True)
+check("newest first", months[0]["period"] > months[1]["period"], True)
+check("weeks are ISO weeks", "W" in analytics.recent_periods("Weekly", 4)[0]["period"], True)
+check("quarters are quarters", "Q" in analytics.recent_periods("Quarterly", 4)[0]["period"], True)
+
+print("\nAn indicator resolves to the right analytics item")
+s = fresh()
+vals = analytics.map_values("rate:RtEYsASU7PG", "202607", session=s)
+call = [p for u, p in s.calls if "analytics" in u][0]
+dims = {d.split(":", 1)[0]: d.split(":", 1)[1] for d in call["dimension"]}
+check("a rate becomes .REPORTING_RATE", dims["dx"], "RtEYsASU7PG.REPORTING_RATE")
+check("districts are asked for, not facilities", dims["ou"], f"LEVEL-3;{REGION}")
+check("it is a percentage", vals["kind"], "percent")
+
+s = fresh()
+analytics.map_values("ontime:RtEYsASU7PG", "202607", session=s)
+dims = {d.split(":", 1)[0]: d.split(":", 1)[1] for d in
+        [p for u, p in s.calls if "analytics" in u][0]["dimension"]}
+check("on-time becomes .REPORTING_RATE_ON_TIME", dims["dx"], "RtEYsASU7PG.REPORTING_RATE_ON_TIME")
+
+s = fresh()
+raw = analytics.map_values("de:sv6SeKroHPV", "202607", session=s)
+dims = {d.split(":", 1)[0]: d.split(":", 1)[1] for d in
+        [p for u, p in s.calls if "analytics" in u][0]["dimension"]}
+check("a data element is passed through unsuffixed", dims["dx"], "sv6SeKroHPV")
+check("...and is a count, not a percentage", raw["kind"], "count")
+
+print("\nA district that returned nothing is absent, not zero")
+# The stub answers for every org unit it is given, so this asserts the shape
+# rather than the fixture: only districts with a row appear in `values`.
+check("values are keyed by organisation unit", isinstance(vals["values"], dict), True)
+check("the count of reporting districts is stated", vals["reporting"], len(vals["values"]))
+check("min and max are given for the legend",
+      vals["min"] is not None and vals["max"] is not None, True)
+
+print("\nA malformed indicator or period is refused before DHIS2 is called")
+for bad, why in [("nonsense", "no prefix"), ("rate:short", "not a UID"),
+                 ("weird:RtEYsASU7PG", "unknown prefix")]:
+    try:
+        analytics.map_values(bad, "202607", session=fresh())
+        check(f"{why} is refused", True, False)
+    except RuntimeError as exc:
+        check(f"{why} is refused", "Check the indicator parameter" in str(exc), True)
+try:
+    analytics.map_values("rate:RtEYsASU7PG", "July", session=fresh())
+    check("a malformed period is refused", True, False)
+except RuntimeError as exc:
+    check("a malformed period is refused", "Check the period parameter" in str(exc), True)
+
+print("\nA refused district listing explains the permission")
+s = fresh(status=403)
+try:
+    analytics.districts(session=s)
+    check("a 403 on the listing raises", True, False)
+except RuntimeError as exc:
+    check("a 403 on the listing raises RuntimeError", True, True)
+    check("...and names the variables to change", "DHIS2_USERNAME" in str(exc), True)
 
 print("\nRows are read by header name, not by position")
 # Analytics puts the columns in whatever order the dimensions were given. A
