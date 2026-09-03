@@ -152,3 +152,60 @@ if failures:
         print("  - " + f)
     sys.exit(1)
 print("All checks passed.")
+
+
+# ---------------------------------------------------------------------------
+# Authored errors must reach the browser, added 3 September 2026.
+#
+# Reported from production: uploading the week-35 tally returned
+# "Upload failed (500): Internal Server Error" and nothing else.
+#
+# The cause was not a crash. surveillance_index() raises a RuntimeError whose
+# message says exactly what to do - "The HMIS 033B data element list is empty.
+# The cached DHIS2 metadata predates this report. Set DHIS2_USERNAME and
+# DHIS2_PASSWORD (or DHIS2_PAT) and run Refresh metadata in the admin page."
+# Nothing caught it, so FastAPI returned a bare 500 and the instruction was
+# lost. A configuration problem the operator can fix must never present as a
+# crash.
+# ---------------------------------------------------------------------------
+print("\nA fixable problem must not present as a crash")
+src = open(os.path.join(HERE, "..", "api", "index.py")).read()
+
+check("a RuntimeError handler exists",
+      "@app.exception_handler(RuntimeError)" in src, True)
+check("it answers 503, not 500", 'status_code=503, content={"detail": str(exc)}' in src, True)
+check("the authored message is passed through verbatim",
+      'content={"detail": str(exc)}' in src, True)
+
+check("the upload dispatch catches RuntimeError itself",
+      "except RuntimeError as exc:" in src, True)
+check("...and re-raises HTTPException rather than swallowing it",
+      "except HTTPException:\n        raise" in src, True)
+
+check("an unexpected exception is still handled",
+      "@app.exception_handler(Exception)" in src, True)
+# An arbitrary exception can carry a connection string or a token, so its
+# message must NOT be echoed to the browser - only its type and the route.
+handler = src[src.index("@app.exception_handler(Exception)"):]
+handler = handler[:handler.index("# ---------------- auth")]
+check("an unexpected exception does NOT echo its message",
+      "str(exc)" in handler, False)
+check("...but does name the type, so it can be found in the logs",
+      "type(exc).__name__" in handler, True)
+check("...and states that nothing was saved", "nothing was saved" in handler, True)
+
+# Every library RuntimeError should be worth showing: it should tell the reader
+# what to do, not merely what went wrong.
+import glob  # noqa: E402
+authored = []
+for path in glob.glob(os.path.join(HERE, "..", "api", "_lib", "*.py")):
+    text = open(path).read()
+    for i, line in enumerate(text.splitlines()):
+        if "raise RuntimeError(" in line:
+            block = " ".join(text.splitlines()[i:i + 6])
+            authored.append((os.path.basename(path), block))
+actionable = [a for a in authored
+              if any(w in a[1] for w in ("Set ", "Run ", "run ", "Check ", "check ",
+                                         "configure", "Configure", "expected", "must"))]
+check(f"all {len(authored)} library RuntimeErrors tell the reader what to do",
+      len(actionable), len(authored))

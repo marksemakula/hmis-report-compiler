@@ -17,7 +17,9 @@ def dataset_key(report_type: str) -> str:
     types = mapping().get("reportTypes", {})
     entry = types.get((report_type or "").upper())
     if not entry:
-        raise RuntimeError(f"Unknown report type '{report_type}'")
+        raise RuntimeError(
+            f"Unknown report type '{report_type}'. Check the report code in the "
+            f"request; the registered reports are: {', '.join(sorted(types))}.")
     return entry["dataSet"]
 
 
@@ -127,7 +129,9 @@ def resolve_attribute_option_combo(ds_id: str, session=None):
             if o["id"] == wanted or _norm(o["name"]) == _norm(wanted):
                 return o["id"]
         raise RuntimeError(
-            f"DHIS2_AOC is set to '{wanted}' but the data set's '{cc.get('name')}' combo offers: "
+            f"DHIS2_AOC is set to '{wanted}', which this data set's "
+            f"'{cc.get('name')}' combination does not offer. Set DHIS2_AOC in the "
+            "project settings to one of: "
             + ", ".join(f"{o['name']} ({o['id']})" for o in options))
     if len(options) == 1:
         return options[0]["id"]

@@ -135,7 +135,9 @@ def skeleton(report_type: str, force_refresh: bool = False) -> str:
     types = mapping().get("reportTypes", {})
     entry = types.get((report_type or "").upper())
     if not entry:
-        raise RuntimeError(f"Unknown report type '{report_type}'")
+        raise RuntimeError(
+            f"Unknown report type '{report_type}'. Check the report code; the "
+            f"registered reports are: {', '.join(sorted(types))}.")
     key = entry["dataSet"]
 
     if not force_refresh and key in _SKELETONS:
@@ -153,8 +155,11 @@ def skeleton(report_type: str, force_refresh: bool = False) -> str:
         raw = _fetch_form_html(ds_id)
         if not raw:
             raise RuntimeError(
-                f"DHIS2 holds no custom entry form for {mapping()['dataSets'][key]['name']}, "
-                "so there is no official layout to preview."
+                f"DHIS2 holds no custom entry form for "
+                f"{mapping()['dataSets'][key]['name']}, so there is no official "
+                "layout to preview. Check that the data set still has a custom "
+                "data entry form on the national instance, then run Refresh form "
+                "layouts in the admin page."
             )
         skel = sanitise(raw)
         try:

@@ -9,6 +9,7 @@ sys.path.append(os.path.dirname(__file__))
 import requests
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response, Depends
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from _lib import db
@@ -48,6 +49,28 @@ app = FastAPI(title="HMIS Report Compiler", docs_url=None, redoc_url=None)
 
 def err(detail, code=400):
     raise HTTPException(status_code=code, detail=detail)
+
+
+@app.exception_handler(RuntimeError)
+def _runtime_error(request: Request, exc: RuntimeError):
+    """Surface an authored RuntimeError instead of an anonymous 500.
+
+    The library raises RuntimeError for problems an operator can actually fix -
+    DHIS2 credentials absent, metadata cache stale, a data set with no custom
+    form - and each message says what to do. Without this handler every one of
+    them reached the browser as "Internal Server Error", which is the least
+    useful thing the app could possibly say about a fixable problem."""
+    return JSONResponse(status_code=503, content={"detail": str(exc)})
+
+
+@app.exception_handler(Exception)
+def _unhandled(request: Request, exc: Exception):
+    """Anything genuinely unexpected. The message is NOT echoed - an arbitrary
+    exception can carry a connection string or a token - but the type and the
+    route are, which is enough to find it in the deployment logs."""
+    return JSONResponse(status_code=500, content={
+        "detail": f"Unexpected {type(exc).__name__} handling {request.url.path}. "
+                  "The details are in the deployment logs; nothing was saved."})
 
 
 # ---------------- auth ----------------
@@ -149,24 +172,34 @@ def upload(body: UploadBody, user: dict = Depends(current_user)):
     # columns rather than its name, so a renamed file still works.
     source = "UPLOAD"
     context, consistency = {}, []
-    if body.report_type == "SURV":
-        clean, errors, context = validate_surveillance_rows(rows, period)
-        # Arithmetic the form implies but cannot enforce. Surfaced at upload,
-        # while the figures can still be questioned, rather than after they
-        # have been submitted to the national instance.
-        consistency = check_consistency(clean, context)
-    elif extract_scripts.looks_like_strata(rows[0].keys() if rows else None):
-        try:
-            strata = agentlib.validate_strata([
-                {k: v for k, v in r.items() if k in extract_scripts.strata_columns()}
-                for r in rows])
-        except ValueError as exc:
-            err(f"This looks like an extraction-script file, but it was rejected: {exc}")
-        clean = agentlib.strata_to_rows(strata)
-        errors = []
-        source = "SCRIPT"
-    else:
-        clean, errors = validate_rows(body.report_type, rows, period)
+    # Every branch below can raise RuntimeError, and those messages are written
+    # FOR the person reading them: "the 033B element list is empty, set
+    # DHIS2_USERNAME and run Refresh metadata". Uncaught, FastAPI turned each of
+    # them into a bare 500 Internal Server Error and the instruction was lost.
+    # A configuration problem the operator can fix must never present as a crash.
+    try:
+        if body.report_type == "SURV":
+            clean, errors, context = validate_surveillance_rows(rows, period)
+            # Arithmetic the form implies but cannot enforce. Surfaced at
+            # upload, while the figures can still be questioned, rather than
+            # after they have been submitted to the national instance.
+            consistency = check_consistency(clean, context)
+        elif extract_scripts.looks_like_strata(rows[0].keys() if rows else None):
+            try:
+                strata = agentlib.validate_strata([
+                    {k: v for k, v in r.items() if k in extract_scripts.strata_columns()}
+                    for r in rows])
+            except ValueError as exc:
+                err(f"This looks like an extraction-script file, but it was rejected: {exc}")
+            clean = agentlib.strata_to_rows(strata)
+            errors = []
+            source = "SCRIPT"
+        else:
+            clean, errors = validate_rows(body.report_type, rows, period)
+    except HTTPException:
+        raise                       # err() above; already has its own message
+    except RuntimeError as exc:
+        err(str(exc), 503)
     in_period = sum(1 for r in clean if r["in_period"])
 
     with db.get_conn() as conn:
