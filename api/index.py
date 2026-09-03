@@ -519,14 +519,31 @@ def malaria_element_list(user: dict = Depends(current_user)):
         err(f"The malaria element list could not be built: {type(exc).__name__}", 502)
 
 
+@app.get("/api/py/malaria/facilities")
+def malaria_facility_list(user: dict = Depends(current_user)):
+    """The facilities the channel can be drawn for, so a peer hospital or a
+    health centre can be charted beside this one."""
+    try:
+        return {"facilities": analytics.region_facilities()}
+    except RuntimeError:
+        raise
+    except requests.HTTPError as exc:
+        err(f"DHIS2 rejected the organisation unit request: {exc}", 502)
+    except Exception as exc:
+        err(f"The facility list could not be read: {type(exc).__name__}", 502)
+
+
 @app.get("/api/py/malaria/channel")
 def malaria_channel(element: str = "", scope: str = "facility", year: int = None,
-                    baseline: int = 5, user: dict = Depends(current_user)):
+                    baseline: int = 5, ou: str = "", user: dict = Depends(current_user)):
     """Weekly malaria cases against percentile bands built from previous years -
-    the endemic-channel method Uganda uses to detect epidemics."""
+    the endemic-channel method Uganda uses to detect epidemics.
+
+    `ou` charts one named facility instead of the scope, and is checked against
+    the regional list rather than passed to DHIS2 on trust."""
     try:
         return analytics.malaria_channel(element=element, scope=scope,
-                                         year=year, baseline=baseline)
+                                         year=year, baseline=baseline, ou=ou)
     except RuntimeError:
         raise
     except requests.HTTPError as exc:

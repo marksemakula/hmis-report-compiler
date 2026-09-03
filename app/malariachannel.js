@@ -20,20 +20,43 @@ import { IconAlert } from './icons';
  * only one. The line that matters is drawn in ink, not in a band colour.
  */
 
+/* The channel has two walls, and both are now drawn.
+ *
+ * The upper limit is the 75th percentile of the same week in the baseline
+ * years: Uganda's own evaluation of outbreak-detection methods (Malaria
+ * Journal, 2024) compared it against mean+2SD and C-SUM on five years of DHIS2
+ * data and recommended it for detection everywhere. The epidemic line at the
+ * 85th follows UNIPH's policy brief.
+ *
+ * The lower limit is the 25th percentile, the mirror of the upper. A week below
+ * it is not an epidemic signal and is not coloured like one; it is drawn
+ * because a week far below every previous year is a fact about the data worth
+ * seeing, and at this hospital it has more often meant a return filed short
+ * than malaria receding.
+ */
 const BANDS = [
-  { key: 'normal', label: 'Expected', fill: 'rgba(47,179,68,.16)' },
+  { key: 'low', label: 'Below the expected channel', fill: 'rgba(4,32,69,.06)' },
+  { key: 'normal', label: 'Expected (25th-75th percentile)', fill: 'rgba(47,179,68,.16)' },
   { key: 'alert', label: 'Alert (>75th percentile)', fill: 'rgba(245,159,0,.20)' },
   { key: 'epidemic', label: 'Epidemic (>85th percentile)', fill: 'rgba(214,57,57,.16)' },
+];
+
+const LIMIT_LINES = [
+  { key: 'alert', label: 'Upper limit (75th percentile)', stroke: '#f59f00', dash: null },
+  { key: 'low', label: 'Lower limit (25th percentile)', stroke: '#4263eb', dash: '6 3' },
 ];
 
 const STATUS = {
   normal: { badge: 'ok', word: 'Within the expected channel' },
   alert: { badge: 'warn', word: 'Above the alert threshold' },
   epidemic: { badge: 'bad', word: 'Above the epidemic threshold' },
+  low: { badge: 'muted', word: 'Below the lower limit' },
   unknown: { badge: 'muted', word: 'Not enough data to classify' },
 };
 
-const nf = (n) => (n === null || n === undefined ? '—' : Number(n).toLocaleString('en-GB'));
+const nf = (n) => (n === null || n === undefined
+  ? 'not reported'
+  : Math.round(Number(n)).toLocaleString('en-GB'));
 
 /** A round step, so the axis reads 0 / 250 / 500 rather than 0 / 188 / 375. */
 function niceStep(rough) {
@@ -119,12 +142,19 @@ function Channel({ data }) {
           </g>
         ))}
 
-        <path d={areaPath(() => 0, (w) => w.alert)} fill={BANDS[0].fill} />
-        <path d={areaPath((w) => w.alert, (w) => w.epidemic)} fill={BANDS[1].fill} />
-        <path d={areaPath((w) => w.epidemic, () => top)} fill={BANDS[2].fill} />
+        <path d={areaPath(() => 0, (w) => w.low)} fill={BANDS[0].fill} />
+        <path d={areaPath((w) => w.low, (w) => w.alert)} fill={BANDS[1].fill} />
+        <path d={areaPath((w) => w.alert, (w) => w.epidemic)} fill={BANDS[2].fill} />
+        <path d={areaPath((w) => w.epidemic, () => top)} fill={BANDS[3].fill} />
 
         <path d={linePath((w) => w.median)} fill="none" stroke="#6b7280"
           strokeWidth="1.5" strokeDasharray="4 3" />
+        {/* The two walls of the channel, drawn rather than left as the edge of
+            a shaded area: a limit a reader can point at is the thing this chart
+            is consulted for, and a band edge is not pointable. */}
+        <path d={linePath((w) => w.low)} fill="none" stroke="#4263eb"
+          strokeWidth="1.5" strokeDasharray="6 3" />
+        <path d={linePath((w) => w.alert)} fill="none" stroke="#f59f00" strokeWidth="1.75" />
         <path d={linePath((w) => w.epidemic)} fill="none" stroke="#d63939" strokeWidth="1.5" />
         <path d={linePath((w) => w.current)} fill="none" stroke="#1f2937"
           strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
@@ -160,28 +190,29 @@ function Channel({ data }) {
             <div className="fw-bold" style={{ marginBottom: '.25rem' }}>
               Week {active.week}, {data.year}
             </div>
-            <div className="d-flex items-center gap-2">
-              <span className="text-secondary">This year</span>
-              <span className="ms-auto fw-medium" style={{ paddingLeft: '1rem' }}>{nf(active.current)}</span>
-            </div>
-            <div className="d-flex items-center gap-2">
-              <span className="text-secondary">Epidemic threshold</span>
-              <span className="ms-auto fw-medium" style={{ paddingLeft: '1rem' }}>
-                {active.epidemic === null ? '—' : Math.round(active.epidemic).toLocaleString('en-GB')}
-              </span>
-            </div>
-            <div className="d-flex items-center gap-2">
-              <span className="text-secondary">Alert threshold</span>
-              <span className="ms-auto fw-medium" style={{ paddingLeft: '1rem' }}>
-                {active.alert === null ? '—' : Math.round(active.alert).toLocaleString('en-GB')}
-              </span>
-            </div>
-            <div className="d-flex items-center gap-2">
-              <span className="text-secondary">Median of {active.n} year{active.n === 1 ? '' : 's'}</span>
-              <span className="ms-auto fw-medium" style={{ paddingLeft: '1rem' }}>
-                {active.median === null ? '—' : Math.round(active.median).toLocaleString('en-GB')}
-              </span>
-            </div>
+            {[
+              ['This year', active.current],
+              ['Epidemic threshold', active.epidemic],
+              ['Upper limit (75th)', active.alert],
+              [`Median of ${active.n} year${active.n === 1 ? '' : 's'}`, active.median],
+              ['Lower limit (25th)', active.low],
+            ].map(([label, value]) => (
+              <div className="d-flex items-center gap-2" key={label}>
+                <span className="text-secondary">{label}</span>
+                <span className="ms-auto fw-medium" style={{ paddingLeft: '1rem' }}>{nf(value)}</span>
+              </div>
+            ))}
+            {/* The extremes are reported but not drawn: a line through the
+                highest of five years is a line through five different years,
+                and it reads as a threshold when it is only a record. */}
+            {active.min !== null && active.min !== undefined && (
+              <div className="d-flex items-center gap-2">
+                <span className="text-secondary">Seen in this week before</span>
+                <span className="ms-auto fw-medium" style={{ paddingLeft: '1rem' }}>
+                  {nf(active.min)} to {nf(active.max)}
+                </span>
+              </div>
+            )}
           </div>
         );
       })()}
@@ -192,6 +223,13 @@ function Channel({ data }) {
             <span style={{ width: 12, height: 12, borderRadius: 3, background: b.fill,
               boxShadow: 'inset 0 0 0 1px rgba(4,32,69,.12)', flex: 'none' }} />
             <span className="text-secondary">{b.label}</span>
+          </span>
+        ))}
+        {LIMIT_LINES.map((l) => (
+          <span key={l.key} className="d-flex items-center gap-2">
+            <span style={{ width: 14, height: 0, flex: 'none',
+              borderTop: `2px ${l.dash ? 'dashed' : 'solid'} ${l.stroke}` }} />
+            <span className="text-secondary">{l.label}</span>
           </span>
         ))}
         <span className="d-flex items-center gap-2">
@@ -208,18 +246,32 @@ function Channel({ data }) {
   );
 }
 
-export default function MalariaChannel({ scope = 'facility' }) {
+export default function MalariaChannel({ scope: initialScope = 'facility' }) {
   const [data, setData] = useState(null);
   const [element, setElement] = useState('');
   const [baseline, setBaseline] = useState(5);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
+  /* The chart opens on this hospital, which is the question asked of it most
+     days, and the other three answers are one control away: the region, the
+     country, and any single facility in Busoga. `ou` is only set for that last
+     case and takes precedence over the scope on the server. */
+  const [scope, setScope] = useState(initialScope);
+  const [ou, setOu] = useState('');
+  const [scopeList, setScopeList] = useState([]);
+  const [facilities, setFacilities] = useState([]);
+  const [facilityText, setFacilityText] = useState('');
+
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      const qs = new URLSearchParams({ scope, baseline: String(baseline) });
+      const qs = new URLSearchParams({
+        scope: scope === 'other' ? 'facility' : scope,
+        baseline: String(baseline),
+      });
+      if (scope === 'other' && ou) qs.set('ou', ou);
       if (element) qs.set('element', element);
       const r = await fetch(`/api/py/malaria/channel?${qs.toString()}`);
       const b = await r.json().catch(() => null);
@@ -232,9 +284,44 @@ export default function MalariaChannel({ scope = 'facility' }) {
     } finally {
       setLoading(false);
     }
-  }, [scope, element, baseline]);
+  }, [scope, ou, element, baseline]);
 
-  useEffect(() => { load(); }, [load]);
+  /* Do not fetch a facility-scoped channel with no facility chosen yet: it
+     would draw this hospital again under the label "another facility", which
+     is worse than an empty control. */
+  useEffect(() => {
+    if (scope === 'other' && !ou) return;
+    load();
+  }, [load, scope, ou]);
+
+  /* The three standing scopes, named by the server so the region reads
+     "Busoga" rather than a word this file guessed. */
+  useEffect(() => {
+    let live = true;
+    fetch('/api/py/scopes')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((b) => { if (live && b?.scopes) setScopeList(b.scopes); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, []);
+
+  /* Six hundred names, fetched once and only when someone actually asks for
+     another facility. */
+  useEffect(() => {
+    if (scope !== 'other' || facilities.length) return undefined;
+    let live = true;
+    fetch('/api/py/malaria/facilities')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((b) => { if (live && b?.facilities) setFacilities(b.facilities); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [scope, facilities.length]);
+
+  const pickFacility = (text) => {
+    setFacilityText(text);
+    const hit = facilities.find((f) => f.name.toLowerCase() === text.trim().toLowerCase());
+    setOu(hit ? hit.id : '');
+  };
 
   const years = useMemo(() => [3, 5, 7, 10], []);
 
@@ -265,6 +352,40 @@ export default function MalariaChannel({ scope = 'facility' }) {
   return (
     <>
       <div className="map-filters" style={{ marginBottom: '1rem' }}>
+        <div>
+          <label htmlFor="mc-scope">Where</label>
+          <select id="mc-scope" value={scope}
+            onChange={(e) => { setScope(e.target.value); if (e.target.value !== 'other') setOu(''); }}>
+            {(scopeList.length ? scopeList : [{ scope: 'facility', short: 'This hospital' }])
+              .map((s) => <option key={s.scope} value={s.scope}>{s.short || s.name}</option>)}
+            <option value="other">Another facility in the region</option>
+          </select>
+          {scope !== 'other' && (
+            <div className="form-hint">{data.orgUnit?.name}</div>
+          )}
+        </div>
+
+        {scope === 'other' && (
+          <div>
+            <label htmlFor="mc-facility">Facility</label>
+            {/* A list of six hundred is a search box, not a dropdown. The input
+                holds a name and `ou` holds the id only once a name matches one
+                exactly, so a half-typed name cannot be charted as somewhere
+                else. */}
+            <input id="mc-facility" list="mc-facility-list" value={facilityText}
+              placeholder={facilities.length
+                ? `Search ${facilities.length} facilities`
+                : 'Reading the facility list…'}
+              onChange={(e) => pickFacility(e.target.value)} />
+            <datalist id="mc-facility-list">
+              {facilities.map((f) => <option key={f.id} value={f.name} />)}
+            </datalist>
+            <div className="form-hint">
+              {ou ? data.orgUnit?.name : 'Pick a facility to draw its channel.'}
+            </div>
+          </div>
+        )}
+
         {data.elements?.length > 1 && (
           <div>
             <label htmlFor="mc-element">Case series</label>
@@ -296,7 +417,19 @@ export default function MalariaChannel({ scope = 'facility' }) {
         </div>
       )}
 
-      <Channel data={data} />
+      {/* Between choosing "another facility" and naming one there is nothing to
+          draw. Leaving the previous chart up would label this hospital's weeks
+          with someone else's question. */}
+      {scope === 'other' && !ou ? (
+        <div className="empty">
+          <div className="empty-title">Choose a facility</div>
+          <div className="empty-subtitle">
+            Start typing a name to draw that facility&rsquo;s channel for {data.year}.
+          </div>
+        </div>
+      ) : (
+        <Channel data={data} />
+      )}
     </>
   );
 }

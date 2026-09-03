@@ -707,6 +707,29 @@ ALERT_PERCENTILE = 75
 EPIDEMIC_PERCENTILE = 85
 MIN_BASELINE_YEARS = 5
 
+# The floor of the channel. A channel has two walls, and until now only the
+# upper one was drawn, so a week far BELOW what the same week has always been
+# looked identical to a quiet ordinary week.
+#
+# There is no Ugandan guidance for the lower bound, because the published work
+# is about detecting epidemics rather than detecting their absence. Two
+# conventions exist. The endemic-channel tradition (Bortman's canal endemico,
+# used across PAHO) divides the year into four zones on the quartiles, making
+# the first quartile the boundary of the "success" zone. The older WHO field
+# guide draws a channel between the lowest and highest of the previous five
+# years.
+#
+# The 25th percentile is the one that belongs here, because it is the mirror of
+# the wall already drawn: Uganda's evaluation of outbreak-detection methods
+# (Malaria Journal, 2024) settled on the 75th percentile of the same week over
+# five previous years, and the opposite of the 75th is the 25th, not the lowest
+# observation. A lowest-of-five floor is also fragile in exactly the way this
+# hospital's data is fragile - one week of a stock-out, or one week the register
+# was not filed, sets the floor at or near zero for the next five years, and the
+# line then never fires again. The minimum and maximum are still reported per
+# week, so the fuller range is a hover away.
+LOW_PERCENTILE = 25
+
 
 def _percentile(values: list, p: float):
     """Linear-interpolation percentile, the same convention as numpy's default.
@@ -751,8 +774,56 @@ def malaria_elements() -> list:
     return out
 
 
+def region_facilities(session=None) -> list:
+    """Every health facility in the region, for the channel's facility picker.
+
+    Read from the hierarchy rather than listed anywhere, so a facility opened or
+    renamed in Busoga appears without a code change. Cached with everything else
+    here: it is six hundred names that change perhaps twice a year."""
+    def produce():
+        h = hierarchy(session=session)
+        s = _session(session)
+        r = s.get(f"{_base()}/api/organisationUnits.json", params=[
+            ("filter", f"path:like:{h['region']['id']}"),
+            ("filter", f"level:eq:{h['facilityLevel']}"),
+            ("fields", "id,name"),
+            ("order", "name:asc"),
+            ("paging", "false"),
+        ], timeout=60)
+        r.raise_for_status()
+        return [{"id": o["id"], "name": o.get("name") or o["id"]}
+                for o in (r.json().get("organisationUnits") or []) if o.get("id")]
+
+    return _cached("region_facilities", produce)
+
+
+def _resolve_org_unit(ou: str, scope: str, session=None) -> dict:
+    """The org unit a channel is drawn for: one of the three scopes, or a named
+    facility within the region.
+
+    A free-text org unit id is not accepted on trust. Anything outside Busoga
+    would draw a channel this hospital has no business publishing, and a typo
+    would otherwise reach DHIS2 as a request for a unit that does not exist and
+    come back as an analytics error nobody can act on."""
+    h = hierarchy(session=session)
+    if not ou:
+        return h[scope]
+    ou = str(ou).strip()
+    for known in (h["facility"], h["region"], h["national"]):
+        if ou == known["id"]:
+            return known
+    match = next((f for f in region_facilities(session=session) if f["id"] == ou), None)
+    if not match:
+        raise RuntimeError(
+            f"'{ou}' is not a facility in {h['region']['name']}. The channel can be "
+            "drawn for this hospital, the region, the country, or any facility in "
+            "the regional list.")
+    return {**match, "scope": "facility", "level": h["facilityLevel"]}
+
+
 def malaria_channel(element: str = "", scope: str = "facility", year: int = None,
-                    baseline: int = MIN_BASELINE_YEARS, session=None) -> dict:
+                    baseline: int = MIN_BASELINE_YEARS, ou: str = "",
+                    session=None) -> dict:
     """Weekly case counts against percentile bands built from previous years."""
     scope = (scope or "facility").lower()
     if scope not in SCOPES:
@@ -785,12 +856,17 @@ def malaria_channel(element: str = "", scope: str = "facility", year: int = None
     baseline = max(1, min(int(baseline or MIN_BASELINE_YEARS), 10))
     baseline_years = list(range(year - baseline, year))
 
+    # The scope names one of the three standing org units; `ou` overrides it
+    # with a named facility, which is how a peer hospital is charted. The
+    # parameter is resolved into `target` rather than reassigned, so the two
+    # never shadow one another.
     h = hierarchy(session=session)
-    ou = h[scope]
+    target = _resolve_org_unit(ou, scope, session=session)
+    charted = next((s for s in SCOPES if h[s]["id"] == target["id"]), "other")
 
     def weekly(y):
         weeks = [f"{y}W{w}" for w in range(1, iso_weeks_in_year(y) + 1)]
-        res = query([chosen["id"]], ou["id"], ";".join(weeks), session=session)
+        res = query([chosen["id"]], target["id"], ";".join(weeks), session=session)
         out = {}
         for row in res["rows"]:
             m = re.fullmatch(r"(\d{4})W(\d{1,2})", str(row.get("pe") or "").upper())
@@ -809,9 +885,15 @@ def malaria_channel(element: str = "", scope: str = "facility", year: int = None
         weeks.append({
             "week": w,
             "n": len(past),
+            "low": _percentile(past, LOW_PERCENTILE),
             "median": _percentile(past, 50),
             "alert": _percentile(past, ALERT_PERCENTILE),
             "epidemic": _percentile(past, EPIDEMIC_PERCENTILE),
+            # The observed extremes, for the tooltip. Not drawn: a line through
+            # the highest of five years is a line through five different years,
+            # and it reads as a threshold when it is only a record.
+            "min": min(past) if past else None,
+            "max": max(past) if past else None,
             "current": current.get(w),
         })
 
@@ -824,6 +906,11 @@ def malaria_channel(element: str = "", scope: str = "facility", year: int = None
         status = "epidemic"
     elif latest["alert"] is not None and latest["current"] > latest["alert"]:
         status = "alert"
+    elif latest["low"] is not None and latest["current"] < latest["low"]:
+        # Worth saying, and not an epidemic signal. At this hospital a week well
+        # below every previous year has more often meant the return was filed
+        # short than that malaria receded.
+        status = "low"
     else:
         status = "normal"
 
@@ -831,10 +918,14 @@ def malaria_channel(element: str = "", scope: str = "facility", year: int = None
     return {
         "element": chosen,
         "elements": candidates,
-        "orgUnit": {"id": ou["id"], "name": ou["name"]},
-        "scope": scope,
+        "orgUnit": {"id": target["id"], "name": target["name"]},
+        # What was actually charted: the scope asked for, or "other" when a
+        # named facility overrode it, so the control can show what is selected
+        # without re-deriving it from the org unit id.
+        "scope": charted,
         "year": year,
         "baselineYears": baseline_years,
+        "lowPercentile": LOW_PERCENTILE,
         "alertPercentile": ALERT_PERCENTILE,
         "epidemicPercentile": EPIDEMIC_PERCENTILE,
         "weeks": weeks,
