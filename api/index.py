@@ -23,7 +23,7 @@ from _lib.surveillance import (
     SURV_COLUMNS, check_consistency, compile_033b, describe_week,
     parse_week_period, template_csv, validate_surveillance_rows,
 )
-from _lib import consistency, coverage, dhis2, extract_scripts, forms, periods
+from _lib import analytics, consistency, coverage, dhis2, extract_scripts, forms, periods
 
 EXPECTED_COLUMNS = {"OPD": OPD_COLUMNS, "IPD": IPD_COLUMNS, "SURV": SURV_COLUMNS}
 
@@ -408,6 +408,48 @@ def dhis2_preflight(report_type: str = "OPD", user: dict = Depends(current_user)
         err(f"Preflight failed: {exc}", 502)
 
 
+# ---------------- dashboard scopes ----------------
+#
+# The dashboard can be read at three widths: this hospital, its region, and the
+# nation. Only the first is ours. The other two are read from DHIS2 analytics
+# and are a different measure - not "what we compiled" but "who filed" - which
+# is why they are a separate endpoint rather than a parameter on /reports.
+#
+# Both are open to every signed-in role including Viewer: they are read-only
+# aggregates and a supervisor is precisely who wants them.
+
+@app.get("/api/py/scopes")
+def dashboard_scopes(user: dict = Depends(current_user)):
+    """The three org units the dashboard tabs address, resolved from the
+    facility's own ancestors so the region follows a re-parenting."""
+    try:
+        return {"scopes": analytics.scopes()}
+    except RuntimeError:
+        raise
+    except requests.HTTPError as exc:
+        err(f"DHIS2 rejected the organisation unit lookup: {exc}", 502)
+    except Exception as exc:
+        err(f"The organisation unit hierarchy could not be read: {type(exc).__name__}", 502)
+
+
+@app.get("/api/py/overview")
+def dashboard_overview(scope: str = "region", user: dict = Depends(current_user)):
+    """Reporting completeness, headline totals and this hospital's rank among
+    its peers, for one scope. Facility scope is served by /reports; this answers
+    the two wider ones."""
+    try:
+        return analytics.overview(scope)
+    except RuntimeError:
+        # Carries an authored message - a missing ancestor, a refused read, an
+        # unknown scope - each of which names the thing to change. The handler
+        # returns it verbatim as 503.
+        raise
+    except requests.HTTPError as exc:
+        err(f"DHIS2 rejected the analytics request: {exc}", 502)
+    except Exception as exc:
+        err(f"The {scope} figures could not be read: {type(exc).__name__}", 502)
+
+
 # ---------------- audit ----------------
 
 @app.get("/api/py/audit")
@@ -491,6 +533,10 @@ def meta_refresh(user: dict = Depends(current_user)):
         v._IPD_INDEX = None
         surveillance.reset_index()
         forms.reset_cache()
+        # The regional and national figures memoise the hierarchy and the
+        # analytics answers; a metadata refresh that changed the org unit would
+        # otherwise leave the wider tabs pointing at the old one.
+        analytics.reset_cache()
         counts = {
             "de_105": len(m["dataElements"].get("HMIS105_01", {})),
             "de_108": len(m["dataElements"].get("HMIS108", {})),
