@@ -48,7 +48,9 @@ import { IconAlert } from './icons';
  * itself, plus every figure in the tooltip.
  */
 const INK = '#0b0b0b';
-const MUTED = '#898781';
+const MUTED = '#898781';      // the median and lower-limit MARKS
+const TEXT = '#181818';       // every label on the chart
+const GRID = '#e1e0d9';
 const BAND_FILL = 'rgba(82,81,78,.13)';
 const ALERT_COLOUR = '#f59f00';
 const EPIDEMIC_COLOUR = '#d63939';
@@ -173,11 +175,11 @@ function Channel({ data }) {
       <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H}
         style={{ width: '100%', height: `${H}px`, display: 'block' }} role="img"
         aria-label={`Weekly malaria cases for ${data.orgUnit?.name} in ${data.year}, against percentile bands from ${data.baselineYears?.join(', ')}`}>
-        <text x={padL - 44} y="12" fontSize="11" fill={MUTED}>Cases</text>
+        <text x={padL - 44} y="12" fontSize="11" fill={TEXT}>Cases</text>
         {ticks.map((v) => (
           <g key={v}>
-            <line x1={padL} x2={padL + plotW} y1={yOf(v)} y2={yOf(v)} stroke="#e1e0d9" strokeWidth="1" />
-            <text x={padL - 8} y={yOf(v) + 4} textAnchor="end" fontSize="11" fill={MUTED}>
+            <line x1={padL} x2={padL + plotW} y1={yOf(v)} y2={yOf(v)} stroke={GRID} strokeWidth="1" />
+            <text x={padL - 8} y={yOf(v) + 4} textAnchor="end" fontSize="11" fill={TEXT}>
               {v >= 1000 ? `${Math.round(v / 1000)}k` : Math.round(v)}
             </text>
           </g>
@@ -204,7 +206,7 @@ function Channel({ data }) {
             <line x1={padL + plotW + 4} x2={padL + plotW + 16} y1={l.y} y2={l.y}
               stroke={l.colour} strokeWidth="2"
               strokeDasharray={l.dash || undefined} />
-            <text x={padL + plotW + 20} y={l.y + 4} fontSize="11" fill="#52514e">{l.text}</text>
+            <text x={padL + plotW + 20} y={l.y + 4} fontSize="11" fill={TEXT}>{l.text}</text>
           </g>
         ))}
 
@@ -231,14 +233,14 @@ function Channel({ data }) {
         {weeks.map((w, i) => (
           <g key={`x${w.week}`}>
             {(w.week === 1 || w.week % 4 === 0) && (
-              <text x={xOf(i)} y={H - 22} textAnchor="middle" fontSize="11" fill={MUTED}>{w.week}</text>
+              <text x={xOf(i)} y={H - 22} textAnchor="middle" fontSize="11" fill={TEXT}>{w.week}</text>
             )}
             <rect x={xOf(i) - plotW / Math.max(weeks.length - 1, 1) / 2} y={padT}
               width={plotW / Math.max(weeks.length - 1, 1)} height={plotH} fill="transparent"
               onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)} />
           </g>
         ))}
-        <text x={padL + plotW / 2} y={H - 5} textAnchor="middle" fontSize="11" fill={MUTED}>
+        <text x={padL + plotW / 2} y={H - 5} textAnchor="middle" fontSize="11" fill={TEXT}>
           ISO week
         </text>
       </svg>

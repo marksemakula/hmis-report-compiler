@@ -51,15 +51,19 @@
 
   --tblr-primary:       #066fd1;
   --tblr-primary-rgb:   6, 111, 209;
-  --tblr-secondary:     #6b7280;
+  /* Secondary TEXT is now near-black, not grey. Requested, and it matches
+     idrc-uganda.org's own #181818 body colour. Only text tokens change:
+     --tblr-gray-* stay grey because they are surfaces, borders and
+     gridlines, and a black hairline grid would shout over the data. */
+  --tblr-secondary:     #181818;
   --tblr-success:       #2fb344;
   --tblr-info:          #4299e1;
   --tblr-warning:       #f59f00;
   --tblr-danger:        #d63939;
 
   --tblr-body-bg:        #f9fafb;
-  --tblr-body-color:     #1f2937;
-  --tblr-body-color-rgb: 31, 41, 55;
+  --tblr-body-color:     #181818;
+  --tblr-body-color-rgb: 24, 24, 24;
   --tblr-surface:        #ffffff;
   --tblr-surface-secondary: #f9fafb;
 
@@ -85,17 +89,22 @@
 
   /* -- type ---------------------------------------------------------------
    *
-   * Ubuntu, loaded by next/font in layout.js, which is what defines
-   * --font-ubuntu. It is deliberately NOT redefined here: :root and the class
-   * next/font puts on <html> have equal specificity, so declaring it in both
-   * places would leave the winner decided by source order.
+   * Gill Sans MT, as the Uganda Malaria Surveillance Programme's own site sets
+   * it (idrc-uganda.org uses "Gill Sans MT", sans-serif and #181818 text), so
+   * this dashboard reads as part of the same programme.
    *
-   * Tabler sets headings at 600. Ubuntu has 300/400/500/700 and no 600, so the
-   * browser's font matching resolves 600 upwards to 700 regardless; 700 is
-   * declared here so the rendered weight is the one written down.
+   * Gill Sans MT ships with Microsoft Office rather than with any operating
+   * system and is not on Google Fonts, so it cannot be loaded as a webfont and
+   * a machine without Office will never show it. The fallbacks are therefore
+   * chosen to be humanist sans faces that hold the same voice rather than to
+   * be whatever is nearest: Gill Sans on macOS, Gill Sans Nova on newer Office,
+   * then Calibri and Trebuchet, and Ubuntu last for the Linux machines where
+   * none of those exist. --font-ubuntu is kept in the stack for exactly that
+   * reason; it is now the fallback rather than the face.
    */
-  --tblr-font-sans-serif: var(--font-ubuntu), Ubuntu, -apple-system,
-    BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  --tblr-font-sans-serif: 'Gill Sans MT', 'Gill Sans Nova', 'Gill Sans',
+    Calibri, 'Trebuchet MS', var(--font-ubuntu), Ubuntu, -apple-system,
+    BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --tblr-font-monospace: 'Ubuntu Mono', Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
   --tblr-font-size-base: .875rem;
   --tblr-line-height-base: 1.4285714286;
@@ -103,11 +112,11 @@
   --tblr-font-weight-bold: 700;
 
   /* -- legacy aliases, still read by inline styles across the pages -------- */
-  --navy:   #1f2937;
+  --navy:   #181818;
   --navy-2: #066fd1;
   --gold:   #f59f00;
-  --ink:    #1f2937;
-  --muted:  #6b7280;
+  --ink:    #181818;
+  --muted:  #181818;   /* legacy alias for secondary TEXT */
   --line:   #e5e7eb;
   --bg:     #f9fafb;
   --card:   #ffffff;

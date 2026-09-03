@@ -95,7 +95,7 @@ function RateTrend({ points }) {
         {ticks.map((v) => (
           <g key={v}>
             <line x1={padL} x2={W - padR} y1={yOf(v)} y2={yOf(v)} stroke="#e5e7eb" strokeWidth="1" />
-            <text x={padL - 8} y={yOf(v) + 4} textAnchor="end" fontSize="11" fill="#6b7280">{v}%</text>
+            <text x={padL - 8} y={yOf(v) + 4} textAnchor="end" fontSize="11" fill="#181818">{v}%</text>
           </g>
         ))}
 
@@ -114,7 +114,7 @@ function RateTrend({ points }) {
                 run ends on the current period instead of leaving two labels
                 adjacent at the right edge. */}
             {(points.length <= 6 || (points.length - 1 - i) % 2 === 0) && (
-              <text x={xOf(i)} y={H - 10} textAnchor="middle" fontSize="11" fill="#6b7280">
+              <text x={xOf(i)} y={H - 10} textAnchor="middle" fontSize="11" fill="#181818">
                 {p.label.slice(0, 3)}
               </text>
             )}

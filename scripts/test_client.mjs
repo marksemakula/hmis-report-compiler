@@ -155,6 +155,39 @@ check('and the hint is rendered under the file picker',
       page.includes('REPORTS[reportType].takes'), true);
 check('no em dash in the hints', /—/.test(reportsBlock), false);
 
+/* House style: Gill Sans MT throughout, and text in near-black rather than grey.
+ *
+ * Both are set once, as tokens, so a component that hard-codes #6b7280 for a
+ * label silently opts out of them. These checks are what stops that drifting
+ * back in one component at a time.
+ */
+console.log('\nThe house typeface and near-black text');
+const css = readFileSync(join(here, '..', 'app', 'globals.css'), 'utf8');
+check('Gill Sans MT leads the sans stack', /--tblr-font-sans-serif:\s*'Gill Sans MT'/.test(css), true);
+check('...with a fallback for machines that do not have it',
+      /Gill Sans MT'[^;]*Ubuntu/s.test(css), true);
+check('secondary text is near-black', /--tblr-secondary:\s*#181818/.test(css), true);
+check('body text is near-black', /--tblr-body-color:\s*#181818/.test(css), true);
+check('gridline and surface greys are left alone',
+      /--tblr-gray-500:\s*#6b7280/.test(css), true);
+
+for (const file of ['page.js', 'malariachannel.js', 'districtmap.js']) {
+  const src = readFileSync(join(here, '..', 'app', file), 'utf8');
+  const greyText = [...src.matchAll(/fill="(#6b7280|#9ca3af|#52514e)"/g)].map((m) => m[1]);
+  check(`${file} has no grey label colour left`, greyText.join(',') || 'none', 'none');
+}
+
+console.log('\nThe district map names its districts');
+const map = readFileSync(join(here, '..', 'app', 'districtmap.js'), 'utf8');
+check('a label point is computed per district', map.includes('function labelPlacement'), true);
+check('...from the largest ring, not the whole geometry',
+      /largest ring/i.test(map), true);
+check('...and dropped when the district is too narrow for it',
+      map.includes('MIN_LABEL_W'), true);
+check('the names are painted with a halo so they read over any band',
+      map.includes('paintOrder="stroke"'), true);
+check('the map fills the card width', /let w = width;/.test(map), true);
+
 console.log();
 if (failures.length) {
   console.log(`${failures.length} check(s) failed:\n`);

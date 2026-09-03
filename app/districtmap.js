@@ -25,8 +25,11 @@ import useWidth from './usewidth';
    beside it rather than beneath. Both are here rather than buried in the
    layout arithmetic because they are the two numbers anyone adjusting the
    map's size will want. */
-const MAX_FIGURE_H = 500;
+const MAX_FIGURE_H = 1040;
 const LEGEND_MIN_W = 170;
+// Below this width a district's name will not fit inside it, so the label is
+// dropped rather than spilled across a neighbour.
+const MIN_LABEL_W = 34;
 
 function mercatorY(lat) {
   const clamped = Math.max(-85, Math.min(85, lat));
@@ -64,6 +67,52 @@ function shapePath(geometry, project) {
   // Every ring of every polygon in one path, with fill-rule evenodd so an
   // interior ring reads as a hole rather than a second island.
   return polys.map((rings) => rings.map((r) => ringPath(r, project)).join('')).join('');
+}
+
+/* Where a district's name goes, and whether it fits.
+ *
+ * The centroid of the LARGEST ring, not of the whole geometry: Namayingo's
+ * islands in Lake Victoria would otherwise drag its label into the water, and
+ * a district whose name floats off its own shape is worse than an unlabelled
+ * one. The ring's own bounding box then says whether the name fits inside it.
+ */
+function ringArea(ring) {
+  let a = 0;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i, i += 1) {
+    a += (ring[j][0] * ring[i][1]) - (ring[i][0] * ring[j][1]);
+  }
+  return Math.abs(a / 2);
+}
+
+function labelPlacement(geometry, project) {
+  const polys = geometry.type === 'Polygon' ? [geometry.coordinates] : geometry.coordinates;
+  let best = null;
+  polys.forEach((rings) => {
+    const outer = rings[0];
+    if (!outer || outer.length < 3) return;
+    const area = ringArea(outer);
+    if (!best || area > best.area) best = { area, ring: outer };
+  });
+  if (!best) return null;
+
+  const pts = best.ring.map((c) => project(c));
+  const xs = pts.map((p) => p[0]);
+  const ys = pts.map((p) => p[1]);
+  // The area centroid of the projected ring, which sits inside any shape that
+  // is not badly concave; the bounding-box centre is the fallback for those.
+  let twice = 0, cx = 0, cy = 0;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i, i += 1) {
+    const cross = (pts[j][0] * pts[i][1]) - (pts[i][0] * pts[j][1]);
+    twice += cross;
+    cx += (pts[j][0] + pts[i][0]) * cross;
+    cy += (pts[j][1] + pts[i][1]) * cross;
+  }
+  const boxW = Math.max(...xs) - Math.min(...xs);
+  const boxH = Math.max(...ys) - Math.min(...ys);
+  const centre = Math.abs(twice) > 1e-6
+    ? [cx / (3 * twice), cy / (3 * twice)]
+    : [(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2];
+  return { x: centre[0], y: centre[1], width: boxW, height: boxH };
 }
 
 /* ------------------------------------------------------------------ colour
@@ -250,17 +299,38 @@ export default function DistrictMap({ homeDistrictOnly = false }) {
      alongside; below that it drops underneath, which is the right answer on a
      phone and the wrong one at 482px. */
   const { figureW, figureH, legendBeside } = useMemo(() => {
-    let h = Math.min(MAX_FIGURE_H, Math.max(340, Math.round(width)));
-    let w = Math.round(h * aspect);
-    // Still bounded by the card: a wide, short region must not overflow it.
-    if (w > width) { w = width; h = Math.round(w / aspect); }
+    // Fill the card's width, and let the aspect ratio set the height from it.
+    // At the tile's 482px that draws the region 482 by 1021, about twice the
+    // figure it replaced, which is what makes room for the district names.
+    let w = width;
+    let h = Math.round(w / aspect);
+    if (h > MAX_FIGURE_H) { h = MAX_FIGURE_H; w = Math.round(h * aspect); }
     return { figureW: w, figureH: h, legendBeside: width - w > LEGEND_MIN_W };
   }, [width, aspect]);
+
+  /* Type scales with the figure, but only between bounds: 11px is the floor at
+     which a name is still readable, and past 15 the labels start to crowd the
+     smaller districts out. */
+  const labelSize = Math.max(11, Math.min(15, Math.round(figureW / 40)));
 
   const project = useMemo(
     () => (geo?.bbox ? makeProjection(geo.bbox, figureW, figureH) : null),
     [geo, figureW, figureH],
   );
+
+  /* Name every district on the map itself. The names were only ever in the
+     hover tooltip, which is no use to anyone reading a printed page, working
+     from a screenshot in a report, or using a keyboard. */
+  const placements = useMemo(() => {
+    if (!project || !geo?.districts) return [];
+    return geo.districts.map((d) => {
+      const at = labelPlacement(d.geometry, project);
+      if (!at) return null;
+      // "Jinja District" reads as "Jinja" on a map of districts.
+      const name = String(d.name || '').replace(/\s+district$/i, '').trim();
+      return { id: d.id, name, ...at, fits: at.width >= MIN_LABEL_W };
+    }).filter(Boolean);
+  }, [geo, project]);
   const scale = useMemo(
     () => (values ? buildScale({ ...values, mode }) : null),
     [values, mode],
@@ -367,6 +437,19 @@ export default function DistrictMap({ homeDistrictOnly = false }) {
               <path key={`${d.id}-home`} className="home" d={shapePath(d.geometry, project)}
                 fillRule="evenodd" />
             ))}
+
+          {/* The names, last so nothing is drawn over them. paint-order puts
+              the halo stroke behind the glyphs, which is what keeps a name
+              readable over the darkest band of the ramp as well as the palest;
+              black-on-white with a white halo needs no colour of its own. */}
+          {placements.filter((pl) => pl.fits).map((pl) => (
+            <text key={`${pl.id}-label`} x={pl.x} y={pl.y} textAnchor="middle"
+              fontSize={labelSize} fontWeight={pl.id === geo.facilityDistrict ? 700 : 500}
+              fill="#181818" stroke="#ffffff" strokeWidth="3" paintOrder="stroke"
+              style={{ pointerEvents: 'none' }}>
+              {pl.name}
+            </text>
+          ))}
         </svg>
 
         {hovered && (
