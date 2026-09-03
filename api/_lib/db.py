@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS imported_data (
     id SERIAL PRIMARY KEY,
     file_name VARCHAR(512) NOT NULL,
     report_type VARCHAR(8) NOT NULL,
-    period VARCHAR(6) NOT NULL,
+    period VARCHAR(16) NOT NULL,
     row_count INTEGER NOT NULL DEFAULT 0,
     error_count INTEGER NOT NULL DEFAULT 0,
     original_data JSONB NOT NULL DEFAULT '[]',
@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS reports (
     import_id INTEGER REFERENCES imported_data(id),
     type VARCHAR(8) NOT NULL,
     facility_name VARCHAR(255) NOT NULL,
-    period VARCHAR(6) NOT NULL,
+    period VARCHAR(16) NOT NULL,
     compiled_data JSONB NOT NULL,
     unmapped JSONB NOT NULL DEFAULT '[]',
     generated_by VARCHAR(255) NOT NULL,
@@ -50,6 +50,20 @@ CREATE TABLE IF NOT EXISTS audit_log (
     details JSONB NOT NULL DEFAULT '{}',
     timestamp TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+"""
+
+# CREATE TABLE IF NOT EXISTS leaves an existing table alone, so a column that
+# was too narrow when the table was first made stays too narrow forever. These
+# run on every start and are no-ops once applied.
+#
+# period was VARCHAR(6), sized for a monthly identifier like 202607. A weekly
+# one is seven characters - 2026W35 - so uploading a weekly surveillance tally
+# raised StringDataRightTruncation and the whole upload failed. The cruel detail
+# is that weeks 1 to 9 are six characters and worked, so the fault only appeared
+# from week 10 onwards and looked intermittent.
+_MIGRATIONS = """
+ALTER TABLE imported_data ALTER COLUMN period TYPE VARCHAR(16);
+ALTER TABLE reports       ALTER COLUMN period TYPE VARCHAR(16);
 """
 
 _initialised = False
@@ -70,6 +84,7 @@ def get_conn():
         if not _initialised:
             with conn.cursor() as cur:
                 cur.execute(_SCHEMA)
+                cur.execute(_MIGRATIONS)
             conn.commit()
             _seed_admin(conn)
             _initialised = True

@@ -209,3 +209,78 @@ actionable = [a for a in authored
                                          "configure", "Configure", "expected", "must"))]
 check(f"all {len(authored)} library RuntimeErrors tell the reader what to do",
       len(actionable), len(authored))
+
+
+# ---------------------------------------------------------------------------
+# The database must be able to hold what the application can produce.
+# Added 3 September 2026.
+#
+# period was declared VARCHAR(6), sized for a monthly identifier like 202607.
+# A weekly one is seven characters - 2026W35 - so uploading a weekly tally
+# raised StringDataRightTruncation and the upload failed outright. Weeks 1 to 9
+# are six characters and worked, so the fault appeared only from week 10 and
+# looked intermittent.
+#
+# These checks compare every fixed-width column against the longest value the
+# code can actually put in it, so a narrow column is caught here rather than by
+# someone in a hospital on a Friday afternoon.
+# ---------------------------------------------------------------------------
+print("\nEvery fixed-width column must hold the longest value the app can write")
+import re as _re  # noqa: E402
+
+# This file parses source rather than importing the app, so that it runs with
+# nothing installed and cannot be fooled by a module that imports cleanly but
+# behaves differently. db.py imports psycopg2 and metadata.py reaches for the
+# network, so both are read as text here for the same reason.
+# db.py imports psycopg2, which this suite deliberately does not require: the
+# checks must run on a laptop with nothing installed. So the schema is read as
+# text rather than imported.
+dbsrc = open(os.path.join(HERE, "..", "api", "_lib", "db.py")).read()
+schema = dbsrc[dbsrc.index("_SCHEMA = "):dbsrc.index("_MIGRATIONS")]
+widths = dict(_re.findall(r"(\w+)\s+VARCHAR\((\d+)\)", schema))
+widths = {k: int(v) for k, v in widths.items()}
+
+# Longest period identifier the app can generate, across all three cadences.
+longest_period = max(
+    ["209912", "2099Q4"] + [f"2099W{w}" for w in range(1, 54)], key=len)
+check("the schema declares a period column", "period" in widths, True)
+check(f"period holds the longest identifier ({longest_period}, "
+      f"{len(longest_period)} chars)", widths.get("period", 0) >= len(longest_period), True)
+check("period has headroom beyond the longest known identifier",
+      widths.get("period", 0) >= len(longest_period) + 4, True)
+
+mdsrc = open(os.path.join(HERE, "..", "api", "_lib", "metadata.py")).read()
+report_codes = _re.findall(r'^\s*"([A-Z]{2,8})":\s*\{"dataSet":', mdsrc, _re.M)
+check(f"found the registered report codes ({len(report_codes)})",
+      len(report_codes) >= 8, True)
+longest_type = max(report_codes, key=len)
+check(f"report_type holds the longest report code ({longest_type})",
+      widths.get("report_type", 0) >= len(longest_type), True)
+
+# Audit actions are literals scattered through index.py; an over-long one would
+# fail the very request it was meant to record.
+actions = _re.findall(r'db\.audit\([^,]+,\s*"([^"]+)"', src)
+check(f"{len(actions)} audit actions all fit the action column",
+      [a for a in actions if len(a) > widths.get("action", 64)], [])
+
+# Status vocabularies, read from the code that writes them.
+statuses = set(_re.findall(r'push_status["\']?\s*[:=]\s*["\']([A-Z_]+)["\']', src)) | {
+    "DRAFT", "PUSHED", "FAILED", "DRY_RUN", "PENDING"}
+check("every push status fits",
+      [s for s in statuses if len(s) > widths.get("push_status", 16)], [])
+sources = {"UPLOAD", "SCRIPT", "AGENT"}
+check("every import source fits", [s for s in sources if len(s) > 32], [])
+
+print("\nAn existing database must be migrated, not just newly created correctly")
+# CREATE TABLE IF NOT EXISTS leaves an existing table untouched, so widening the
+# declaration alone would fix nothing for the deployment that already has data.
+check("a migration block exists", "_MIGRATIONS" in dbsrc, True)
+check("it widens imported_data.period",
+      "ALTER TABLE imported_data ALTER COLUMN period TYPE VARCHAR(16)" in dbsrc, True)
+check("it widens reports.period",
+      "ALTER TABLE reports       ALTER COLUMN period TYPE VARCHAR(16)" in dbsrc, True)
+check("the migrations actually run at start-up",
+      "cur.execute(_MIGRATIONS)" in dbsrc, True)
+check("migrations are idempotent (ALTER TYPE only, no destructive statement)",
+      [ln for ln in dbsrc[dbsrc.index("_MIGRATIONS"):dbsrc.index("_initialised")].splitlines()
+       if ln.strip() and ln.strip().startswith(("DROP", "DELETE", "TRUNCATE"))], [])
