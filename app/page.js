@@ -6,10 +6,25 @@ import { describeError, isoWeek, isoWeekMonday, weeksInYear, weekLabel } from '.
 
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
+/* `takes` says what file this report expects, next to the file picker. It is
+   here because the report selector defaults to 105:01 and the commonest upload
+   failure is not a bad file but the right file against the wrong report: a
+   week-35 033B tally uploaded as July 2026 105:01, which validated as
+   seventeen rows each missing a PatientNo it was never going to have. The
+   server now recognises the mismatch and says so in one sentence; this says it
+   before the upload rather than after. */
 const REPORTS = {
-  OPD:  { label: 'eHMIS 105:01 - Outpatient (OPD)',        cadence: 'monthly' },
-  IPD:  { label: 'eHMIS 108 - Inpatient (IPD)',            cadence: 'monthly' },
-  SURV: { label: 'eHMIS 033B - Weekly Surveillance',       cadence: 'weekly'  },
+  OPD:  { label: 'eHMIS 105:01 - Outpatient (OPD)',        cadence: 'monthly',
+          takes: 'A patient-level extract with PatientNo, VisitDate, Age, AgeUnit, '
+               + 'Sex, DiagnosisCode and VisitType, or a strata file from the '
+               + 'extraction script.' },
+  IPD:  { label: 'eHMIS 108 - Inpatient (IPD)',            cadence: 'monthly',
+          takes: 'A patient-level extract with PatientNo, AdmissionDate, '
+               + 'DischargeDate, Age, AgeUnit, Sex, Ward, DiagnosisCode and Outcome.' },
+  SURV: { label: 'eHMIS 033B - Weekly Surveillance',       cadence: 'weekly',
+          takes: 'A two-column tally of Code and Value, one line per indicator. '
+               + 'The blank template and the weekly extraction script both write '
+               + 'this shape.' },
 };
 
 /* The same week, worded for a sentence rather than a dropdown: "24 Aug -
@@ -290,6 +305,10 @@ export default function Workflow() {
               <div style={{ marginTop: 14 }}>
                 <label>Data file (.csv, .xlsx)</label>
                 <input type="file" accept=".csv,.xlsx,.xls" onChange={(e) => setFile(e.target.files[0])} />
+                <p style={{ color: 'var(--muted)', fontSize: 12, margin: '6px 0 0' }}>
+                  {REPORTS[reportType].label.replace(/^eHMIS /, '')} takes:{' '}
+                  {REPORTS[reportType].takes}
+                </p>
               </div>
               <div style={{ marginTop: 18 }}>
                 <button className="btn" disabled={busy || !file}>{busy ? (progress > 0 && progress < 100 ? 'Uploading… ' + Math.round(progress) + '%' : 'Processing…') : 'Upload and validate'}</button>

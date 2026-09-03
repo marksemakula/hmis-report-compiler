@@ -6,6 +6,7 @@ from datetime import datetime, date
 
 from .metadata import mapping
 from .diagnosis_map import map_diagnosis
+from . import periods
 
 
 _IPD_INDEX = None
@@ -96,7 +97,8 @@ def normalise_ward(value: str):
 
 def _parse_date(value):
     value = str(value).strip()
-    for fmt in ("%Y-%m-%d", "%Y-%m-%d %H:%M:%S", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d", "%d/%m/%y"):
+    for fmt in ("%Y-%m-%d", "%Y-%m-%d %H:%M:%S", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d",
+                "%d/%m/%y", "%Y%m%d"):
         try:
             return datetime.strptime(value, fmt).date()
         except ValueError:
@@ -251,6 +253,126 @@ def parse_file(filename: str, content: bytes, expected_columns=None):
     if reader.fieldnames and _is_raw_emr(reader.fieldnames):
         return _collapse_emr_visits(dict_rows)
     return dict_rows
+
+
+# ------------------------------------------------------ recognising the file
+# Each report takes a different shape of file, and the shapes are unmistakable:
+# 033B is a two-column tally, 105:01 and 108 are patient-level line lists, and a
+# generated extraction script writes strata.
+#
+# Uploading one against the wrong report used to fail every required-field check
+# on every row, so a single mis-click on the report selector produced seventeen
+# identical lines reading "PatientNo is required; Age is required; Sex is
+# required..." about a file that was never going to have those columns. The
+# reader is told what is missing and never what is actually wrong.
+#
+# Recognising the shape first lets the upload say, once, what the file is and
+# which report it belongs to. Signatures are the smallest set of columns that
+# cannot appear in any other report's file, so a template with extra columns
+# still matches.
+FILE_SHAPES = [
+    ("SURV",   {"code", "value"}),
+    ("STRATA", {"diagnosis", "band", "sex", "visit", "n"}),
+    ("IPD",    {"patientno", "admissiondate"}),
+    ("OPD",    {"patientno", "visitdate"}),
+]
+
+# What the file IS, named so a person recognises it at a glance...
+SHAPE_DESCRIPTION = {
+    "SURV":   "a weekly 033B tally (its columns are Code and Value)",
+    "STRATA": "an extraction-script strata file (diagnosis, band, sex, visit, n)",
+    "IPD":    "a patient-level 108 inpatient extract (PatientNo, AdmissionDate, Ward)",
+    "OPD":    "a patient-level 105:01 outpatient extract (PatientNo, VisitDate, "
+              "DiagnosisCode)",
+}
+
+# ...and what a report expects, worded to follow its own name without repeating
+# it: "105:01 takes a patient-level extract".
+SHAPE_EXPECTED = {
+    "SURV":   "a two-column tally of Code and Value",
+    "STRATA": "a strata file of diagnosis, band, sex, visit and n",
+    "IPD":    "a patient-level extract with PatientNo, AdmissionDate and Ward",
+    "OPD":    "a patient-level extract with PatientNo, VisitDate and DiagnosisCode",
+}
+
+# The report each shape belongs to, and the shapes each report accepts. The
+# first entry is what that report is built around; the rest are alternatives it
+# also understands, which today means 105:01 taking either a line list or the
+# pre-aggregated strata a generated script writes.
+SHAPE_REPORT = {"SURV": "SURV", "STRATA": "OPD", "IPD": "IPD", "OPD": "OPD"}
+REPORT_SHAPES = {"OPD": ["OPD", "STRATA"], "IPD": ["IPD"], "SURV": ["SURV"]}
+
+
+def _key(name) -> str:
+    return re.sub(r"\s+", "", str(name or "")).lower()
+
+
+def _cells(row) -> dict:
+    """One row keyed by normalised column name, so 'Patient No' and 'PatientNo'
+    are the same column however the export spelled it."""
+    return {_key(k): v for k, v in (row or {}).items() if k}
+
+
+def identify_shape(fieldnames):
+    """Which report's upload format these columns belong to, or None when the
+    columns match nothing we know, in which case the ordinary per-row messages
+    are the more useful answer."""
+    got = {_key(f) for f in (fieldnames or []) if f}
+    for shape, signature in FILE_SHAPES:
+        if signature.issubset(got):
+            return shape
+    return None
+
+
+def period_hint(shape, rows):
+    """The period the file itself says it covers, as a DHIS2 identifier.
+
+    Worth computing because the mis-selection is usually of period as well as
+    report: a week-35 tally uploaded as July 2026 needs both corrected, and the
+    file already knows which week it is."""
+    if shape == "SURV":
+        for row in rows or []:
+            cells = _cells(row)
+            if str(cells.get("code") or "").strip().lower() != "_start_yyyymmdd":
+                continue
+            d = _parse_date(cells.get("value"))
+            if d:
+                iso_year, iso_week, _ = d.isocalendar()
+                return f"{iso_year}W{iso_week}"
+        return None
+    field = "admissiondate" if shape == "IPD" else "visitdate"
+    counts = {}
+    for row in rows or []:
+        d = _parse_date(_cells(row).get(field, ""))
+        if d:
+            key = f"{d.year}{d.month:02d}"
+            counts[key] = counts.get(key, 0) + 1
+    # The modal month, not the first: an extract may carry a stray date either
+    # side of the period it was run for.
+    return max(counts, key=counts.get) if counts else None
+
+
+def shape_mismatch(report_type: str, rows: list):
+    """The message for a file that belongs to a different report, or None.
+
+    Validation answers "is this row usable"; it cannot answer "is this the right
+    file", and asked the wrong question it repeats itself once per row. Deciding
+    it here, before validation, means the answer is given once, names the report
+    the file does belong to, and carries the period the file says it covers."""
+    shape = identify_shape(rows[0].keys() if rows else None)
+    accepted = REPORT_SHAPES.get(report_type)
+    if not shape or not accepted or shape in accepted:
+        return None
+    reports = mapping().get("reportTypes", {})
+    got = reports.get(report_type, {"short": report_type})
+    wants = reports.get(SHAPE_REPORT[shape], {"short": SHAPE_REPORT[shape],
+                                              "periodType": "Monthly"})
+    hint = period_hint(shape, rows)
+    when = (f", period {periods.describe(wants['periodType'], hint)}"
+            if hint else f" and pick a {str(wants['periodType']).lower()} period")
+    return (f"This file is {SHAPE_DESCRIPTION[shape]}, but {got['short']} was "
+            f"selected, and {got['short']} takes {SHAPE_EXPECTED[accepted[0]]}. "
+            f"Select {wants['short']}{when}, then upload it again.")
 
 
 def validate_rows(report_type: str, rows: list, period: str):

@@ -133,6 +133,26 @@ check('week 1 of 2026 opens in December 2025, per ISO-8601',
 check('a 53-week year offers all 53', weekFns.weeksInYear(2026), 53);
 check('a 52-week year offers 52', weekFns.weeksInYear(2025), 52);
 
+/* Every report says what file it takes, next to the file picker.
+ *
+ * The week-35 tally was uploaded as July 2026 105:01 and came back as
+ * seventeen rows each missing a PatientNo. The server now names the mismatch;
+ * this line is meant to prevent it. A report added without a `takes` would
+ * render "undefined" under the file input, which is worse than saying nothing.
+ */
+console.log('\nThe upload panel says what file each report takes');
+const page = readFileSync(join(here, '..', 'app', 'page.js'), 'utf8');
+const reportsBlock = page.slice(page.indexOf('const REPORTS = {'),
+                                page.indexOf('export default function'));
+for (const key of ['OPD:', 'IPD:', 'SURV:']) {
+  const entry = reportsBlock.slice(reportsBlock.indexOf(key));
+  const upto = entry.slice(0, entry.indexOf('},'));
+  check(`${key.replace(':', '')} declares what it takes`, /takes:\s*'/.test(upto), true);
+}
+check('and the hint is rendered under the file picker',
+      page.includes('REPORTS[reportType].takes'), true);
+check('no em dash in the hints', /—/.test(reportsBlock), false);
+
 console.log();
 if (failures.length) {
   console.log(`${failures.length} check(s) failed:\n`);

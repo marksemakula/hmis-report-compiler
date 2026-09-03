@@ -14,7 +14,9 @@ from pydantic import BaseModel
 
 from _lib import db
 from _lib.auth import issue_token, current_user, require_role
-from _lib.validators import parse_file, validate_rows, mapping, OPD_COLUMNS, IPD_COLUMNS
+from _lib.validators import (
+    IPD_COLUMNS, OPD_COLUMNS, mapping, parse_file, shape_mismatch, validate_rows,
+)
 from _lib.compiler import compile_opd, compile_ipd, compile_opd_strata
 from _lib import agent as agentlib
 from _lib.surveillance import (
@@ -167,6 +169,12 @@ def upload(body: UploadBody, user: dict = Depends(current_user)):
     if not rows:
         err("The file contains no data rows. Check that the register was "
             "exported into a sheet whose first row has the template headers.")
+    # Is this the right file for the report that was selected? Asking before
+    # validation turns seventeen identical required-field lines about columns
+    # the file was never going to have into one sentence naming what it is.
+    mismatch = shape_mismatch(body.report_type, rows)
+    if mismatch:
+        err(mismatch)
     # A file written by a generated extraction script is already aggregated:
     # counts by diagnosis, age band, sex and visit type. Recognised by its
     # columns rather than its name, so a renamed file still works.
