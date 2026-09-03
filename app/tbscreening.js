@@ -2,7 +2,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { IconAlert } from './icons';
 
-/* Outpatient attendance split by whether the patient was screened for TB.
+/* Attendance split by whether the patient was screened for TB, counted from
+ * the start of the year.
+ *
+ * Both series are HMIS 033B, the weekly return, so the total is the sum of ISO
+ * weeks 1 to the current week. Weeks nobody filed contribute nothing rather
+ * than a zero, and the card says how many of the elapsed weeks reported, so a
+ * thin denominator is visible instead of implied.
  *
  * Drawn as a part-to-whole because that is what it is. "Screened for TB" is a
  * subset of attendance, so a pie of attendance against screened would draw the
@@ -49,6 +55,11 @@ function arc(cx, cy, rOuter, rInner, from, to) {
 
 export default function TbScreening() {
   const [scope, setScope] = useState('facility');
+  // Empty means "whatever the server matched by name". The pickers appear only
+  // when 033B offers more than one candidate, so a wrong match is correctable
+  // rather than silent.
+  const [attEl, setAttEl] = useState('');
+  const [scrEl, setScrEl] = useState('');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -58,7 +69,10 @@ export default function TbScreening() {
     setLoading(true);
     setError('');
     try {
-      const r = await fetch(`/api/py/tb-screening?scope=${encodeURIComponent(scope)}`);
+      const qs = new URLSearchParams({ scope });
+      if (attEl) qs.set('attendance', attEl);
+      if (scrEl) qs.set('screened', scrEl);
+      const r = await fetch(`/api/py/tb-screening?${qs.toString()}`);
       const b = await r.json().catch(() => null);
       if (!r.ok) throw new Error(b?.detail || `Screening figures unavailable (HTTP ${r.status}).`);
       setData(b);
@@ -68,17 +82,35 @@ export default function TbScreening() {
     } finally {
       setLoading(false);
     }
-  }, [scope]);
+  }, [scope, attEl, scrEl]);
 
   useEffect(() => { load(); }, [load]);
 
+  const series = (key, value, set, label) => {
+    const options = data?.candidates?.[key] || [];
+    if (options.length < 2) return null;
+    return (
+      <div style={{ marginTop: '.5rem' }}>
+        <label htmlFor={`tb-${key}`}>{label}</label>
+        <select id={`tb-${key}`} value={value || data?.elements?.[key]?.id || ''}
+          onChange={(e) => set(e.target.value)}>
+          {options.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+        </select>
+      </div>
+    );
+  };
+
   const picker = (
-    <div>
-      <label htmlFor="tb-level">Level</label>
-      <select id="tb-level" value={scope} onChange={(e) => setScope(e.target.value)}>
-        {LEVELS.map((l) => <option key={l.scope} value={l.scope}>{l.label}</option>)}
-      </select>
-    </div>
+    <>
+      <div>
+        <label htmlFor="tb-level">Level</label>
+        <select id="tb-level" value={scope} onChange={(e) => setScope(e.target.value)}>
+          {LEVELS.map((l) => <option key={l.scope} value={l.scope}>{l.label}</option>)}
+        </select>
+      </div>
+      {series('attendance', attEl, setAttEl, 'Attendance series')}
+      {series('screened', scrEl, setScrEl, 'Screening series')}
+    </>
   );
 
   if (loading && !data) {
@@ -124,21 +156,21 @@ export default function TbScreening() {
 
       {data.inconsistent && (
         <div className="alert warn" style={{ marginTop: '.75rem' }}>
-          More people were recorded as screened than attended in {data.periodLabel}. One of
-          the two elements is likely unfiled; the share below is not reliable.
+          More people were recorded as screened than attended over {data.periodLabel}.
+          One of the two 033B elements is likely unfiled; the share below is not reliable.
         </div>
       )}
 
       {nothing ? (
         <div className="empty" style={{ padding: '1.5rem 0 .5rem' }}>
           <div className="empty-subtitle">
-            No 105:01 attendance was reported for {data.orgUnit.name} in {data.periodLabel}.
+            No 033B attendance was reported for {data.orgUnit.name} over {data.periodLabel}.
           </div>
         </div>
       ) : (
         <div className="d-flex items-center gap-4 flex-wrap" style={{ marginTop: '.875rem' }}>
           <svg width={S} height={S} viewBox={`0 0 ${S} ${S}`} style={{ flex: 'none' }} role="img"
-            aria-label={`${rate}% of ${nf(attendance)} attendances screened for TB in ${data.periodLabel}`}>
+            aria-label={`${rate}% of ${nf(attendance)} attendances screened for TB, ${data.periodLabel}`}>
             {slices.map((s) => (
               s.to - s.from <= 0 ? null : (
                 <path key={s.key} d={arc(C, C, R, RI, s.from, s.to)} fill={s.colour}
@@ -169,7 +201,14 @@ export default function TbScreening() {
               <span className="fw-medium">Total attendance</span>
               <span className="ms-auto fw-bold">{nf(attendance)}</span>
             </div>
-            <div className="stat-foot">{data.periodLabel} · {data.orgUnit.name}</div>
+            <div className="stat-foot">
+              {data.periodLabel} · {data.orgUnit.name}
+              {data.weeksReported < data.weeksElapsed && (
+                <> · <span className="fw-medium" style={{ color: 'var(--tblr-danger)' }}>
+                  {data.weeksReported} of {data.weeksElapsed} weeks reported
+                </span></>
+              )}
+            </div>
           </div>
         </div>
       )}

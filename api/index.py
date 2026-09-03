@@ -509,14 +509,17 @@ def map_value_lookup(indicator: str, period: str, user: dict = Depends(current_u
 # ---------------- TB screening share ----------------
 
 @app.get("/api/py/tb-screening")
-def tb_screening(scope: str = "facility", period: str = None,
-                 user: dict = Depends(current_user)):
-    """Outpatient attendance split into screened and not screened for TB.
+def tb_screening(scope: str = "facility", year: int = None, attendance: str = "",
+                 screened: str = "", user: dict = Depends(current_user)):
+    """Attendance split into screened and not screened for TB, cumulative from
+    the start of the year.
 
-    105:01 is a monthly return, so this is a month even though the tile it
-    feeds sits beside weekly figures; the response says which month."""
+    Both series are HMIS 033B, the weekly return, so the total is the sum of
+    ISO weeks 1 to the current week. The response says how many of those weeks
+    actually reported."""
     try:
-        return analytics.tb_screening(scope=scope, period=period)
+        return analytics.tb_screening(scope=scope, year=year,
+                                      attendance=attendance, screened=screened)
     except RuntimeError:
         raise
     except requests.HTTPError as exc:

@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "api"))
 
 from _lib import analytics  # noqa: E402
 from _lib import metadata  # noqa: E402
+import re as _re  # noqa: E402
 
 failures = []
 
@@ -593,80 +594,119 @@ except RuntimeError as exc:
 # ----------------------------------------------------------- TB screening
 
 class ScreeningSession(StubSession):
-    """105:01 attendance and TB screening for one month."""
+    """033B weekly attendance and TB screening. Weeks 1 to 20 reported; 21
+    onwards have not been filed yet."""
 
-    VALUES = {"sv6SeKroHPV": 4200, "sQ4EexvvhVe": 2600, "LwMHVYBkzx9": 1700}
+    ATT, SCR = "de033batt01", "de033btb001"
+    PER_WEEK = {ATT: 340, SCR: 85}
+    REPORTED_THROUGH = 20
 
     def _analytics(self, params):
         dims = {d.split(":", 1)[0]: d.split(":", 1)[1] for d in params.get("dimension", [])}
-        rows = [[dx, dims["pe"], dims["ou"], str(self.VALUES[dx])]
-                for dx in dims["dx"].split(";") if dx in self.VALUES]
+        rows = []
+        for pe in dims.get("pe", "").split(";"):
+            m = _re.fullmatch(r"(\d{4})W(\d{1,2})", pe)
+            if not m or int(m.group(2)) > self.REPORTED_THROUGH:
+                continue
+            for dx in dims["dx"].split(";"):
+                if dx in self.PER_WEEK:
+                    rows.append([dx, pe, dims["ou"], str(self.PER_WEEK[dx])])
         return {"headers": [{"name": "dx"}, {"name": "pe"}, {"name": "ou"}, {"name": "value"}],
                 "metaData": {"items": {}}, "rows": rows}
 
 
-metadata._MAPPING["HMIS105_01_codeIndex"] = {
-    "OA01": "sv6SeKroHPV", "OA02": "sQ4EexvvhVe", "TP01a": "LwMHVYBkzx9",
-}
+metadata._MAPPING["dataElements"] = {"HMIS033B": {
+    "de033batt01": {"name": "033B-AP01. Total OPD Attendance"},
+    "de033btb001": {"name": "033B-TB01. Number screened for TB"},
+    "de033bmal01": {"name": "033B-CD01a. Malaria (Confirmed) - Cases"},
+    "de033bdth01": {"name": "033b-AP03. Total Deaths"},
+}}
 
-print("\nAttendance is the sum of new and re-attendance")
+print("\nBoth series come from 033B, matched by name rather than hard-coded")
+cands = analytics.tb_screening_candidates()
+check("the attendance series is found", [c["id"] for c in cands["attendance"]], ["de033batt01"])
+check("the TB screening series is found", [c["id"] for c in cands["screened"]], ["de033btb001"])
+check("the code prefix is stripped for reading",
+      cands["attendance"][0]["label"], "Total OPD Attendance")
+# "Total Deaths" is not attendance and must not be offered as it.
+check("an unrelated 033B element is not offered",
+      any(c["label"] == "Total Deaths" for c in cands["attendance"]), False)
+
+print("\nThe total is cumulative from week 1, not one week")
 analytics.reset_cache()
-tb = analytics.tb_screening(scope="facility", period="202607", session=ScreeningSession())
-check("attendance sums OA01 and OA02", tb["attendance"], 6800)
-check("screened is TP01a alone", tb["screened"], 1700)
-# The whole point of the split: the two slices must total the attendance.
+_s = ScreeningSession()
+tb = analytics.tb_screening(scope="facility", year=2026, session=_s)
+weeks_asked = [d.split(":", 1)[1] for u, p in _s.calls if "analytics" in u
+               for d in p["dimension"] if d.startswith("pe:")][0].split(";")
+check("it asks from week 1", weeks_asked[0], "2026W1")
+check("...through the current week, not the whole year",
+      len(weeks_asked), tb["throughWeek"])
+# 20 weeks reported at 340 and 85 a week.
+check("attendance is the sum of the weeks", tb["attendance"], 20 * 340)
+check("screening is the sum of the weeks", tb["screened"], 20 * 85)
 check("the two slices partition attendance",
       tb["screened"] + tb["notScreened"], tb["attendance"])
 check("the share is screened over attendance", tb["rate"], 25.0)
-check("the elements used are named for auditing",
-      tb["elements"], {"attendance": ["OA01", "OA02"], "screened": "TP01a"})
+check("the label says it is a run of weeks",
+      tb["periodLabel"].startswith("Weeks 1 to "), True)
 
-print("\n105:01 is monthly, so the period must be a month")
+print("\nWeeks nobody filed are absent from the total and counted separately")
+check("only the weeks that reported are counted", tb["weeksReported"], 20)
+check("...and the weeks elapsed are reported alongside",
+      tb["weeksElapsed"] >= tb["weeksReported"], True)
+
+print("\nA past year runs to its own last week, not to today's")
 analytics.reset_cache()
-check("the default period is a month",
-      len(analytics.tb_screening(scope="facility", session=ScreeningSession())["period"]), 6)
-try:
-    analytics.tb_screening(period="2026W35", session=ScreeningSession())
-    check("a week is refused", True, False)
-except RuntimeError as exc:
-    check("a week is refused", "monthly return" in str(exc), True)
+old = analytics.tb_screening(scope="facility", year=2020, session=ScreeningSession())
+check("2020 had 53 ISO weeks", old["throughWeek"], 53)
 
 print("\nMore screened than attended cannot be drawn as a slice bigger than the pie")
 
 
 class BadScreeningSession(ScreeningSession):
-    VALUES = {"sv6SeKroHPV": 100, "sQ4EexvvhVe": 0, "LwMHVYBkzx9": 500}
+    PER_WEEK = {ScreeningSession.ATT: 10, ScreeningSession.SCR: 90}
 
 
 analytics.reset_cache()
-bad = analytics.tb_screening(scope="facility", period="202607", session=BadScreeningSession())
+bad = analytics.tb_screening(scope="facility", year=2026, session=BadScreeningSession())
 check("the inconsistency is flagged", bad["inconsistent"], True)
 check("not-screened never goes negative", bad["notScreened"], 0)
 
-print("\nA month nobody filed is reported as unreported, not as zero screening")
+print("\nA year nobody filed is reported as unreported, not as zero screening")
 
 
 class EmptyScreeningSession(ScreeningSession):
-    VALUES = {}
+    REPORTED_THROUGH = 0
 
 
 analytics.reset_cache()
-empty = analytics.tb_screening(scope="facility", period="202607", session=EmptyScreeningSession())
+empty = analytics.tb_screening(scope="facility", year=2026, session=EmptyScreeningSession())
 check("nothing reported is said so", empty["reported"], False)
 check("...and the share is None rather than 0", empty["rate"], None)
+check("...and no weeks are claimed", empty["weeksReported"], 0)
 
-print("\nMissing metadata names the codes it could not find")
-_saved_index = metadata._MAPPING["HMIS105_01_codeIndex"]
-metadata._MAPPING["HMIS105_01_codeIndex"] = {"OA01": "sv6SeKroHPV"}
+print("\nA chosen series is honoured, and a malformed one refused")
+analytics.reset_cache()
+picked = analytics.tb_screening(scope="facility", year=2026, attendance="de033batt01",
+                                screened="de033btb001", session=ScreeningSession())
+check("the chosen attendance series is used",
+      picked["elements"]["attendance"]["id"], "de033batt01")
+check("the candidates travel with the figures so the picker can offer them",
+      len(picked["candidates"]["attendance"]), 1)
+try:
+    analytics.tb_screening(attendance="nope", session=ScreeningSession())
+    check("a malformed element is refused", True, False)
+except RuntimeError as exc:
+    check("a malformed element is refused", "Check the parameter" in str(exc), True)
+
+print("\nNo 033B metadata says to refresh rather than guessing a series")
+metadata._MAPPING["dataElements"] = {}
 analytics.reset_cache()
 try:
     analytics.tb_screening(session=ScreeningSession())
-    check("incomplete metadata raises", True, False)
+    check("an unresolvable series raises", True, False)
 except RuntimeError as exc:
-    check("incomplete metadata raises", "OA02" in str(exc) and "TP01a" in str(exc), True)
-    check("...and says to refresh metadata", "Refresh metadata" in str(exc), True)
-metadata._MAPPING["HMIS105_01_codeIndex"] = _saved_index
-
+    check("an unresolvable series raises", "Refresh metadata" in str(exc), True)
 
 print("\nRows are read by header name, not by position")
 # Analytics puts the columns in whatever order the dimensions were given. A

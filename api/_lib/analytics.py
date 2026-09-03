@@ -688,85 +688,132 @@ def map_values(indicator: str, period: str, session=None) -> dict:
 
 # --------------------------------------------------------- TB screening share
 #
-# What share of outpatient attendances were screened for TB. Two facts about
-# the figures shape this, and both are worth stating rather than working
-# around silently.
+# What share of outpatient attendances were screened for TB, counted from the
+# start of the year.
 #
-# First, the cadence. Attendance (OA01, OA02) and TB screening (TP01a) are
-# elements of HMIS 105:01, which is a MONTHLY return. There is no weekly
-# attendance or TB-screening element anywhere in the eight registered data
-# sets, so this can only be read for a month; the endpoint says which month it
-# used rather than labelling a month as a week.
+# Both figures come from HMIS 033B, the WEEKLY surveillance return, so the
+# cumulative total is the sum of ISO weeks 1 to the current week. Weeks nobody
+# filed contribute nothing rather than a zero, and the count of weeks that did
+# report is returned so a thin denominator is visible instead of implied.
 #
-# Second, the shape. Screened-for-TB is a SUBSET of attendance, not a sibling
-# of it. A pie of "attendance" against "screened" would draw the screened
-# patients twice and its slices would sum to something that is not a
-# population. So the split returned here partitions attendance into screened
-# and not screened, which is a genuine part-to-whole and answers the question
-# a reader actually has.
+# The two elements are resolved from the cached 033B listing by name, never
+# hard-coded. This application has already shipped mappings aimed at elements
+# the Ministry had retired, and the dev metadata cache carries no 033B names at
+# all, so a code written in here would be a guess wearing the clothes of a
+# fact. The candidates are returned with the figures so the picker can offer
+# them and a wrong match is visible and correctable rather than silent.
+#
+# One shape note: screened-for-TB is a SUBSET of attendance, not a sibling of
+# it. A pie of "attendance" against "screened" would draw the screened patients
+# twice and its slices would sum to something that is not a population. So the
+# split returned here partitions attendance into screened and not screened,
+# which is a genuine part-to-whole.
 
-ATTENDANCE_CODES = ("OA01", "OA02")
-TB_SCREENED_CODE = "TP01a"     # 105-TP01a. No. screened for TB-OPD
+_ATTENDANCE_RE = re.compile(r"attendance", re.I)
+_TB_RE = re.compile(r"\btb\b|tubercul", re.I)
+_SCREEN_RE = re.compile(r"screen", re.I)
 
 
-def tb_screening(scope: str = "facility", period: str = None, session=None) -> dict:
+def _surveillance_elements() -> dict:
+    """033B elements, keyed by id, with their display names."""
+    return mapping().get("dataElements", {}).get("HMIS033B") or {}
+
+
+def tb_screening_candidates() -> dict:
+    """The 033B elements that could be the attendance and TB-screening series."""
+    attendance, screened = [], []
+    for deid, info in _surveillance_elements().items():
+        name = (info or {}).get("name") or ""
+        label = _CODE_PREFIX.sub("", name).strip() or name
+        if _SCREEN_RE.search(name) and _TB_RE.search(name):
+            screened.append({"id": deid, "label": label})
+        elif _ATTENDANCE_RE.search(name):
+            attendance.append({"id": deid, "label": label})
+    attendance.sort(key=lambda e: e["label"].lower())
+    screened.sort(key=lambda e: e["label"].lower())
+    return {"attendance": attendance, "screened": screened}
+
+
+def _pick(chosen: str, options: list, what: str) -> dict:
+    if chosen:
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9]{10}", chosen):
+            raise RuntimeError(
+                f"Unrecognised {what} element '{chosen}'. Check the parameter; it must "
+                "be one of the ids returned by /api/py/tb-screening.")
+        return next((o for o in options if o["id"] == chosen),
+                    {"id": chosen, "label": "Selected element"})
+    if not options:
+        raise RuntimeError(
+            f"No HMIS 033B element could be matched for {what}. The cached DHIS2 "
+            "metadata carries no 033B element names, so the series cannot be resolved. "
+            "Set DHIS2_USERNAME and DHIS2_PASSWORD (or DHIS2_PAT) and run Refresh "
+            "metadata in the admin page.")
+    return options[0]
+
+
+def tb_screening(scope: str = "facility", year: int = None, attendance: str = "",
+                 screened: str = "", session=None) -> dict:
     scope = (scope or "facility").lower()
     if scope not in SCOPES:
         raise RuntimeError(
             f"Unknown scope '{scope}'. Check the scope parameter; "
             f"the dashboard scopes are: {', '.join(SCOPES)}.")
 
-    index = mapping().get("HMIS105_01_codeIndex") or {}
-    attendance_ids = [index[c] for c in ATTENDANCE_CODES if index.get(c)]
-    screened_id = index.get(TB_SCREENED_CODE)
-    if not attendance_ids or not screened_id:
-        missing = [c for c in ATTENDANCE_CODES + (TB_SCREENED_CODE,) if not index.get(c)]
-        raise RuntimeError(
-            "The HMIS 105:01 element list does not carry "
-            f"{', '.join(missing)}. The cached DHIS2 metadata is incomplete. Set "
-            "DHIS2_USERNAME and DHIS2_PASSWORD (or DHIS2_PAT) and run Refresh metadata "
-            "in the admin page.")
+    options = tb_screening_candidates()
+    att_el = _pick(attendance, options["attendance"], "attendance")
+    scr_el = _pick(screened, options["screened"], "TB screening")
 
-    period = str(period or periods.default_period("Monthly")).upper()
-    if not re.fullmatch(r"\d{6}", period):
-        raise RuntimeError(
-            f"Unrecognised period '{period}'. Check the period parameter; "
-            "105:01 is a monthly return, so it must be YYYYMM.")
+    today = date.today()
+    iso_year, iso_week, _ = today.isocalendar()
+    year = int(year or iso_year)
+    # Weeks 1 to the current week of the year being read; a past year runs to
+    # its own last week rather than stopping where this year happens to be.
+    through = iso_week if year == iso_year else iso_weeks_in_year(year)
+    weeks = [f"{year}W{w}" for w in range(1, through + 1)]
 
     h = hierarchy(session=session)
     ou = h[scope]
-    res = query(attendance_ids + [screened_id], ou["id"], period, session=session)
+    res = query([att_el["id"], scr_el["id"]], ou["id"], ";".join(weeks), session=session)
 
-    totals = {}
+    totals = {att_el["id"]: 0.0, scr_el["id"]: 0.0}
+    reported_weeks = set()
     for row in res["rows"]:
         v = _num(row.get("value"))
-        if v is not None:
-            totals[row.get("dx")] = totals.get(row.get("dx"), 0) + v
+        if v is None or row.get("dx") not in totals:
+            continue
+        totals[row["dx"]] += v
+        m = re.fullmatch(r"(\d{4})W(\d{1,2})", str(row.get("pe") or "").upper())
+        if m:
+            reported_weeks.add(int(m.group(2)))
 
-    attendance = sum(totals.get(i, 0) for i in attendance_ids) if totals else 0
-    screened = totals.get(screened_id, 0)
-    reported = bool(totals)
+    att = totals[att_el["id"]]
+    scr = totals[scr_el["id"]]
+    reported = bool(reported_weeks)
 
     # More screened than attended cannot be true. It happens when one element
     # was filed and the other was not, and it must not be drawn as a slice
     # larger than the pie.
-    inconsistent = reported and screened > attendance
-    not_screened = max(0.0, attendance - screened)
+    inconsistent = reported and scr > att
+    not_screened = max(0.0, att - scr)
 
     return {
         "scope": scope,
         "orgUnit": {"id": ou["id"], "name": ou["name"]},
-        "period": period,
-        "periodLabel": periods.describe("Monthly", period),
-        "attendance": int(attendance),
-        "screened": int(screened),
+        "year": year,
+        "throughWeek": through,
+        "weeksReported": len(reported_weeks),
+        "weeksElapsed": through,
+        "periodLabel": f"Weeks 1 to {through}, {year}",
+        "attendance": int(att),
+        "screened": int(scr),
         "notScreened": int(not_screened),
-        "rate": round(100 * screened / attendance, 1) if attendance else None,
+        "rate": round(100 * scr / att, 1) if att else None,
         "reported": reported,
         "inconsistent": inconsistent,
-        # Named so the figure can be audited against the form rather than
-        # taken on trust.
-        "elements": {"attendance": list(ATTENDANCE_CODES), "screened": TB_SCREENED_CODE},
+        # Returned so the picker can offer alternatives and the figure can be
+        # audited against the form rather than taken on trust.
+        "elements": {"attendance": att_el, "screened": scr_el},
+        "candidates": options,
     }
 
 

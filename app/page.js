@@ -229,7 +229,7 @@ function FacilityView({ loading, rows, types, meta, agents, user }) {
             the compiled total still reads on the Reports page. */}
         <div className="card flush">
           <div className="card-body">
-            <div className="page-pretitle">TB screening of attendances</div>
+            <div className="page-pretitle">TB screening of attendances, year to date</div>
             <TbScreening />
           </div>
         </div>
