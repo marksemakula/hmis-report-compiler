@@ -197,7 +197,18 @@ check("deaths", data["deaths"], DEATHS)
 check("per thousand attendances", data["ratePerThousand"], round(2 / 2103 * 1000, 2))
 check("the denominator is named", data["denominatorSource"], "033B attendance (AP02)")
 check("the period asked for is the period reported", data["period"], "2026W34")
-check("...and the window behind the bars is stated", data["window"]["weeks"], 13)
+check("...and the window behind the bars is named", data["window"]["label"], "Since 1 January")
+check("...year to date by default", data["window"]["from"], "2026-01-01")
+check("...with the alternatives offered",
+      [w["key"] for w in data["windows"]], ["ytd", "13w", "12m", "24m"])
+thirteen = mortality.summary(period="2026W34", window="13w", session=Session())
+check("a shorter window starts thirteen weeks before the period ends",
+      thirteen["window"]["from"], "2026-05-24")
+try:
+    mortality.summary(period="2026W34", window="fortnight", session=Session())
+    check("an unknown window is refused", "no error", "RuntimeError")
+except RuntimeError as exc:
+    check("an unknown window is refused", "Use one of" in str(exc), True)
 no_deaths = mortality.summary(period="2026W34", session=Session(events=[]))
 check("no certificates means no bars, not a zero", no_deaths["allCause"], [])
 check("...on both groups", no_deaths["mpdsr"], [])

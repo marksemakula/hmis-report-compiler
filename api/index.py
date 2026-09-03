@@ -556,7 +556,7 @@ def malaria_channel(element: str = "", scope: str = "facility", year: int = None
 # ---------------- mortality ----------------
 
 @app.get("/api/py/mortality")
-def mortality_summary(period: str, weeks: int = 12, scope: str = "facility",
+def mortality_summary(period: str, window: str = "ytd", scope: str = "facility",
                       user: dict = Depends(current_user)):
     """Deaths against attendances for one period, and the causes behind them.
 
@@ -565,8 +565,7 @@ def mortality_summary(period: str, weeks: int = 12, scope: str = "facility",
     counted server-side and only the tally is returned - a certificate names
     the deceased, and none of it reaches the browser."""
     try:
-        return mortality.summary(period=period, weeks_back=max(0, min(int(weeks), 52)),
-                                 scope=scope)
+        return mortality.summary(period=period, window=window, scope=scope)
     except RuntimeError:
         raise
     except requests.HTTPError as exc:

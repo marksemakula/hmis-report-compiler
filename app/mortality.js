@@ -58,6 +58,10 @@ export default function Mortality({ scope = 'facility' }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  /* Year to date by default. A rolling quarter is too thin at this hospital:
+     101 causes were certified in the whole of 2026 to date, so thirteen weeks
+     of them is a top five of threes and twos. */
+  const [windowKey, setWindowKey] = useState('ytd');
 
   /* The week just finished: this week is still being filled in, and a rate
      computed halfway through one reads as a collapse in deaths. */
@@ -68,7 +72,7 @@ export default function Mortality({ scope = 'facility' }) {
     setLoading(true);
     setError('');
     try {
-      const r = await fetch(`/api/py/mortality?period=${period}&weeks=12&scope=${scope}`);
+      const r = await fetch(`/api/py/mortality?period=${period}&window=${windowKey}&scope=${scope}`);
       const b = await r.json().catch(() => null);
       if (!r.ok) throw new Error(b?.detail || `Mortality could not be read (HTTP ${r.status}).`);
       setData(b);
@@ -78,7 +82,7 @@ export default function Mortality({ scope = 'facility' }) {
     } finally {
       setLoading(false);
     }
-  }, [period, scope]);
+  }, [period, windowKey, scope]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -145,11 +149,24 @@ export default function Mortality({ scope = 'facility' }) {
         </div>
 
         <div style={{ borderTop: '1px solid var(--tblr-border-color)', paddingTop: '.5rem' }}>
+          <div className="d-flex items-center gap-2" style={{ marginBottom: '.5rem' }}>
+            <label htmlFor="mort-window" className="text-secondary"
+              style={{ fontSize: '.6875rem', marginBottom: 0 }}>Causes counted</label>
+            <select id="mort-window" value={windowKey} onChange={(e) => setWindowKey(e.target.value)}
+              style={{ fontSize: '.6875rem', padding: '.15rem .4rem', width: 'auto' }}>
+              {(data.windows || []).map((w) => (
+                <option key={w.key} value={w.key}>{w.label}</option>
+              ))}
+            </select>
+            <span className="text-secondary ms-auto" style={{ fontSize: '.6875rem' }}>
+              {data.certifiedInWindow} of {data.eventsRead} certificates carry a cause
+            </span>
+          </div>
           <div className="d-flex items-center gap-2" style={{ marginBottom: '.35rem' }}>
             <span style={{ width: 10, height: 10, borderRadius: 2, background: ALL_CAUSE, flex: 'none' }} />
             <span className="fw-medium" style={{ fontSize: '.75rem' }}>All Cause Mortality</span>
             <span className="text-secondary ms-auto" style={{ fontSize: '.6875rem' }}>
-              {data.certifiedInWindow} certified in {data.window?.weeks} weeks
+              {data.certifiedInWindow} deaths
             </span>
           </div>
           <Bars rows={data.allCause} colour={ALL_CAUSE} max={max}

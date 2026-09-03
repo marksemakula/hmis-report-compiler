@@ -199,7 +199,30 @@ def _denominator(period: str, org_unit: str, session=None) -> dict:
             "source": "105:01 attendance (OA01 + OA02)"}
 
 
-def summary(period: str, weeks_back: int = 12, scope: str = "facility",
+# How far back the bars reach. Year to date is the default because a rolling
+# quarter is too thin here: Jinja certified 101 causes in the whole of 2026 to
+# date, so thirteen weeks of them is a top five of threes and twos, and a bar
+# chart of threes and twos invites a reader to rank noise.
+WINDOWS = {
+    "ytd": "Since 1 January",
+    "13w": "Last 13 weeks",
+    "12m": "Last 12 months",
+    "24m": "Last 24 months",
+}
+DEFAULT_WINDOW = "ytd"
+
+
+def _window_start(window: str, end: date) -> date:
+    if window == "13w":
+        return end - timedelta(weeks=13)
+    if window == "12m":
+        return date(end.year - 1, end.month, 1)
+    if window == "24m":
+        return date(end.year - 2, end.month, 1)
+    return date(end.year, 1, 1)
+
+
+def summary(period: str, window: str = DEFAULT_WINDOW, scope: str = "facility",
             session=None) -> dict:
     """Deaths and their causes for one period, with the rate they imply.
 
@@ -222,7 +245,11 @@ def summary(period: str, weeks_back: int = 12, scope: str = "facility",
             "(2026W35) or a month (202608).")
     start, end = bounds
 
-    window_start = start - timedelta(weeks=max(0, weeks_back))
+    window = (window or DEFAULT_WINDOW).lower()
+    if window not in WINDOWS:
+        raise RuntimeError(f"Unknown window '{window}'. Use one of: "
+                           + ", ".join(WINDOWS))
+    window_start = _window_start(window, end)
     events = _events(window_start, end + timedelta(days=1), ou["id"], session=session)
 
     all_cause, mpdsr = {}, {}
@@ -258,8 +285,10 @@ def summary(period: str, weeks_back: int = 12, scope: str = "facility",
         "period": period,
         "periodLabel": periods.describe("Weekly" if periods.parse_week_period(period)
                                         else "Monthly", period),
-        "window": {"from": window_start.isoformat(), "to": end.isoformat(),
-                   "weeks": weeks_back + 1},
+        "window": {"key": window, "label": WINDOWS[window],
+                   "from": window_start.isoformat(), "to": end.isoformat(),
+                   "days": (end - window_start).days},
+        "windows": [{"key": k, "label": v} for k, v in WINDOWS.items()],
         "seen": seen,
         "deaths": period_deaths,
         # Per thousand attendances, which is how a facility death rate is read.
