@@ -729,6 +729,41 @@ _ATTENDANCE_RE = re.compile(r"attendance|attendances|out[\s-]?patient|\bopd\b", 
 _TB_RE = re.compile(r"\btb\b|tubercul", re.I)
 _SCREEN_RE = re.compile(r"screen", re.I)
 
+# Recognising the family is not the same as picking the line. 033B carries
+# several TB lines and several attendance lines, and putting the matches in
+# alphabetical order chooses between them by accident: "Clients diagnosed" wins
+# over "Clients Screened" on the C, and a dashboard then quietly draws the
+# wrong denominator. So the matches are ranked.
+#
+# The wanted screening line is the one counted at the door - "TB01. Clients
+# Screened for TB at all entry points" - not the narrower counts that follow
+# from it, each of which is a subset of it and none of which is the share of
+# attendance this card is about. The wanted attendance line is the total, not
+# one of its breakdowns.
+#
+# Ranked, not required: an instance that words its form differently still
+# resolves to something reasonable, and the picker still overrides either.
+_SCREEN_PREFERRED = re.compile(r"all\s+entry\s+points|\bTB0?1\b", re.I)
+_SCREEN_NARROWER = re.compile(
+    r"presumptive|presumed|diagnos|confirm|positive|referred|treatment|"
+    r"eligible|notified|contact|\bMDR\b|child|under\s*\d", re.I)
+_ATTENDANCE_PREFERRED = re.compile(r"\btotal\b", re.I)
+_ATTENDANCE_NARROWER = re.compile(
+    r"re-?attend|new\s+attend|referral|\bmale\b|\bfemale\b|under\s*\d", re.I)
+
+
+def _rank(entry: dict, preferred, narrower) -> tuple:
+    """Sort key putting the best guess first, then settling ties by name.
+
+    Name length breaks the remaining ties on purpose: between two lines that
+    look equally right, the shorter name is the more general one, and the more
+    general one is the one this card wants.
+    """
+    name = entry["label"]
+    return (0 if preferred.search(name) else 1,
+            1 if narrower.search(name) else 0,
+            len(name), name.lower())
+
 
 def _surveillance_elements() -> dict:
     """033B elements, keyed by id, with their display names."""
@@ -747,8 +782,9 @@ def tb_screening_candidates() -> dict:
             screened.append(entry)
         elif _ATTENDANCE_RE.search(name):
             attendance.append(entry)
-    for group in (attendance, screened, every):
-        group.sort(key=lambda e: e["label"].lower())
+    attendance.sort(key=lambda e: _rank(e, _ATTENDANCE_PREFERRED, _ATTENDANCE_NARROWER))
+    screened.sort(key=lambda e: _rank(e, _SCREEN_PREFERRED, _SCREEN_NARROWER))
+    every.sort(key=lambda e: e["label"].lower())
     return {"attendance": attendance, "screened": screened,
             "all": every, "cached": len(every)}
 

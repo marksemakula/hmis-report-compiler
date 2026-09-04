@@ -431,6 +431,19 @@ main {
 .row-cards > * { margin-bottom: 0; }
 .row-cards .card { margin-bottom: 0; height: 100%; }
 
+/* A row whose cards keep their own height.
+   Filling the row is right when the cards are within a hundred pixels of each
+   other, which is what a line of counters is. It is wrong the moment one of
+   them is a chart three times the height of a counter: the counters become
+   tall empty boxes, and a reader looks at four hundred pixels of white
+   wondering what is missing from them. Ragged bottoms are the smaller cost. */
+.row-cards.own-height { align-items: start; }
+.row-cards.own-height .card { height: auto; }
+
+/* A column of cards inside one row-cards cell, for tiles too short to earn a
+   column each. */
+.card-stack { display: grid; gap: var(--tblr-page-padding); align-content: start; }
+
 .datagrid {
   display: grid;
   gap: 1.5rem;

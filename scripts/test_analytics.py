@@ -632,6 +632,51 @@ check("the code prefix is stripped for reading",
 check("an unrelated 033B element is not offered",
       any(c["label"] == "Total Deaths" for c in cands["attendance"]), False)
 
+print("\nSeveral 033B lines match; the one counted at the door is picked first")
+# The form carries a TB line for each stage of the cascade and each later one
+# is a subset of the screening line, so the order the matches come back in
+# decides the denominator the dashboard draws. Alphabetical order decides it by
+# accident: "Clients diagnosed" beats "Clients Screened" on the C.
+_SAVED_033B = metadata._MAPPING["dataElements"]
+metadata._MAPPING["dataElements"] = {"HMIS033B": {
+    # Every one of these sorts before the wanted line alphabetically, so this
+    # fixture fails outright if the order goes back to being the alphabet's.
+    "de033btb002": {"name": "033B-TB02. Clients screened and found presumptive for TB"},
+    "de033btb003": {"name": "033B-TB03. Clients screened who were diagnosed with TB"},
+    "de033btb001": {"name": "033B-TB01. Clients Screened for TB at all entry points"},
+    "de033btb004": {"name": "033B-TB04. Children screened for TB among contacts"},
+    "de033btb005": {"name": "033B-TB05. Presumptive TB clients investigated"},
+    "de033batt02": {"name": "033B-AP02. OPD Re-attendance"},
+    "de033batt01": {"name": "033B-AP01. Total OPD Attendance"},
+}}
+analytics.reset_cache()
+ranked = analytics.tb_screening_candidates()
+check("the entry-point screening line is offered first",
+      ranked["screened"][0]["label"], "Clients Screened for TB at all entry points")
+# Among themselves the narrower counts tie, and the tie breaks on name length:
+# between two lines that look equally right the shorter name is the more
+# general one. Which of them comes second does not matter; that none of them
+# comes first does.
+check("...and the narrower counts that follow from it come after",
+      [c["id"] for c in ranked["screened"]][1:],
+      ["de033btb004", "de033btb003", "de033btb002"])
+# A line that does not say "screened" is not a screening line, whatever else
+# it says about TB. It stays in the full list to be chosen by hand.
+check("a TB line that is not a screening count is not offered as one",
+      any(c["id"] == "de033btb005" for c in ranked["screened"]), False)
+check("...but it is still there to be chosen by hand",
+      any(c["id"] == "de033btb005" for c in ranked["all"]), True)
+check("the total attendance line is offered first",
+      ranked["attendance"][0]["label"], "Total OPD Attendance")
+check("...with re-attendance offered, but not first",
+      [c["id"] for c in ranked["attendance"]], ["de033batt01", "de033batt02"])
+# The whole list stays alphabetical: it is a lookup table, not a ranking, and
+# a reader hunting for a line by name needs it where the alphabet says.
+check("the full list is still alphabetical, so a line can be found by name",
+      ranked["all"][0]["label"], "Children screened for TB among contacts")
+metadata._MAPPING["dataElements"] = _SAVED_033B
+analytics.reset_cache()
+
 print("\nThe total is cumulative from week 1, not one week")
 analytics.reset_cache()
 _s = ScreeningSession()

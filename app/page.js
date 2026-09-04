@@ -220,9 +220,13 @@ function FacilityView({ loading, rows, types, meta, agents, user }) {
           while this is a number about the hospital. The submitted total has not
           been dropped - it reads on the Reports page, where the submissions
           themselves are. */}
-      <div className="row-cards" style={{ marginBottom: 'var(--tblr-page-padding)',
-        gridTemplateColumns: 'minmax(0,1.6fr) minmax(0,1fr) minmax(0,1fr) minmax(0,1.6fr)',
-        alignItems: 'start' }}>
+      {/* Three columns rather than four. The two submission counters are a line
+          of text each and do not need a column apiece; sharing one leaves the
+          TB screening chart the width to put its legend beside the donut
+          instead of under it, which is most of the difference between a card
+          the height of this row and a card twice it. */}
+      <div className="row-cards own-height" style={{ marginBottom: 'var(--tblr-page-padding)',
+        gridTemplateColumns: 'minmax(0,1.7fr) minmax(0,1fr) minmax(0,1.5fr)' }}>
         {/* TB screening takes the place the "Reports compiled" counter held.
             A count of what this app compiled is a number about the app; the
             share of attendances screened is a number about the hospital, and
@@ -233,13 +237,15 @@ function FacilityView({ loading, rows, types, meta, agents, user }) {
             <TbScreening />
           </div>
         </div>
-        <StatTile Icon={IconInbox} tone="warning" label="Awaiting submission"
-          value={loading ? '—' : nf(drafts.length)}
-          foot={loading ? ' ' : oldestDraft ? `Oldest: ${formatPeriod(oldestDraft.period)}` : 'Nothing waiting'} />
-        <StatTile Icon={IconAlert} tone="danger" label="Failed submissions"
-          valueTone={failed.length ? 'danger' : undefined}
-          value={loading ? '' : nf(failed.length)}
-          foot={loading ? ' ' : failed.length ? `Most recent: ${formatPeriod(failed[0].period)}` : 'None recorded'} />
+        <div className="card-stack">
+          <StatTile Icon={IconInbox} tone="warning" label="Awaiting submission"
+            value={loading ? '—' : nf(drafts.length)}
+            foot={loading ? ' ' : oldestDraft ? `Oldest: ${formatPeriod(oldestDraft.period)}` : 'Nothing waiting'} />
+          <StatTile Icon={IconAlert} tone="danger" label="Failed submissions"
+            valueTone={failed.length ? 'danger' : undefined}
+            value={loading ? '' : nf(failed.length)}
+            foot={loading ? ' ' : failed.length ? `Most recent: ${formatPeriod(failed[0].period)}` : 'None recorded'} />
+        </div>
         <Mortality />
       </div>
 
