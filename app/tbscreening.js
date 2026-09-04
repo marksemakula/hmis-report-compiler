@@ -182,28 +182,42 @@ function shortBand(band, label) {
   return s && s.length <= 8 ? s : label;
 }
 
+/** The query a fetch is made from: what has actually been asked for. */
+const asQuery = (q) => {
+  const p = new URLSearchParams({ scope: q.scope });
+  if (q.attendance.length) p.set('attendance', q.attendance.join(','));
+  if (q.screened) p.set('screened', q.screened);
+  return p.toString();
+};
+
+const START = { scope: 'facility', attendance: [], screened: '' };
+
 export default function TbScreening() {
-  const [scope, setScope] = useState('facility');
-  // Empty means "whatever the server matched by name". The pickers appear only
-  // when 033B offers more than one candidate, so a wrong match is correctable
-  // rather than silent.
-  const [attEl, setAttEl] = useState('');
-  const [scrEl, setScrEl] = useState('');
+  /* Two copies of the filter state. `draft` is what the controls show and
+     `applied` is what the chart was drawn from; only pressing Load moves one
+     to the other. Firing a request on every change of a select means a reader
+     changing two filters watches the chart redraw from a combination they
+     never asked for, and pays for a DHIS2 query to see it. */
+  const [draft, setDraft] = useState(START);
+  const [applied, setApplied] = useState(START);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [hover, setHover] = useState(null);
+  // The series pickers are folded away by default: they are a correction, not
+  // a filter, and on most days nobody touches them.
+  const [openSeries, setOpenSeries] = useState(false);
   const wrap = useRef(null);
   const width = useWidth(wrap, 320);
 
-  const load = useCallback(async () => {
+  const query = asQuery(applied);
+  const dirty = query !== asQuery(draft);
+
+  const load = useCallback(async (qs) => {
     setLoading(true);
     setError('');
     try {
-      const qs = new URLSearchParams({ scope });
-      if (attEl) qs.set('attendance', attEl);
-      if (scrEl) qs.set('screened', scrEl);
-      const r = await fetch(`/api/py/tb-screening?${qs.toString()}`);
+      const r = await fetch(`/api/py/tb-screening?${qs}`);
       const b = await r.json().catch(() => null);
       if (!r.ok) throw new Error(b?.detail || `Screening figures unavailable (HTTP ${r.status}).`);
       setData(b);
@@ -213,47 +227,105 @@ export default function TbScreening() {
     } finally {
       setLoading(false);
     }
-  }, [scope, attEl, scrEl]);
+  }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(query); }, [load, query]);
 
-  const series = (key, value, set, label) => {
-    const matched = data?.candidates?.[key] || [];
-    // When the name matcher found nothing, offer every 033B element rather
-    // than nothing: the reader knows which line of the form they want, and a
-    // regex that failed to recognise a name is no reason to refuse to draw.
+  const set = (patch) => setDraft((d) => ({ ...d, ...patch }));
+
+  /* The denominator takes more than one line, because on this form the total
+     OPD attendance is more than one line. Checkboxes rather than a select for
+     that reason: a select can only say one of them. */
+  const denominator = () => {
+    const matched = data?.candidates?.attendance || [];
     const options = matched.length ? matched : (data?.candidates?.all || []);
-    if (options.length < 2 && !data?.needsChoice) return null;
+    if (!options.length) return null;
+    const current = draft.attendance.length
+      ? draft.attendance
+      : (data?.elements?.attendance || []).map((e) => e.id);
     return (
-      <div style={{ marginTop: '.5rem' }}>
-        <label htmlFor={`tb-${key}`}>{label}</label>
-        <select id={`tb-${key}`} value={value || data?.elements?.[key]?.id || ''}
-          onChange={(e) => set(e.target.value)}>
+      <fieldset style={{ border: 0, padding: 0, margin: '0 0 .5rem', minWidth: 0 }}>
+        <legend className="form-label sm" style={{ padding: 0 }}>
+          Denominator · total OPD attendance
+        </legend>
+        <div className="text-secondary" style={{ fontSize: '.6875rem', marginBottom: '.25rem' }}>
+          Tick every line the total is made of. They are added together.
+        </div>
+        {options.map((o) => (
+          <label key={o.id} className="d-flex items-center gap-2"
+            style={{ fontSize: '.75rem', fontWeight: 400, padding: '.125rem 0',
+              marginBottom: 0, cursor: 'pointer' }}>
+            <input type="checkbox" checked={current.includes(o.id)}
+              onChange={(e) => set({
+                attendance: e.target.checked
+                  ? [...current, o.id]
+                  : current.filter((id) => id !== o.id),
+              })} />
+            <span>{o.label}</span>
+          </label>
+        ))}
+      </fieldset>
+    );
+  };
+
+  const numerator = () => {
+    const matched = data?.candidates?.screened || [];
+    const options = matched.length ? matched : (data?.candidates?.all || []);
+    if (!options.length) return null;
+    return (
+      <div style={{ minWidth: 0 }}>
+        <label className="form-label sm" htmlFor="tb-screened">Numerator · screened for TB</label>
+        <select id="tb-screened" className="sm" value={draft.screened || data?.elements?.screened?.id || ''}
+          onChange={(e) => set({ screened: e.target.value })}>
           {options.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
         </select>
       </div>
     );
   };
 
+  /* One compact line of controls. The card is a chart, so the chart gets the
+     room: the level select sizes to its content instead of the card, and the
+     two series pickers live behind a toggle. */
   const picker = (
-    <>
-      <div>
-        <label htmlFor="tb-level">Level</label>
-        <select id="tb-level" value={scope} onChange={(e) => setScope(e.target.value)}>
+    <div style={{ display: 'flex', alignItems: 'flex-end', gap: '.5rem',
+      flexWrap: 'wrap', marginBottom: '.25rem' }}>
+      <div style={{ minWidth: 0 }}>
+        <label className="form-label sm" htmlFor="tb-level">Level</label>
+        <select id="tb-level" className="sm" style={{ width: 'auto', minWidth: '9.5rem' }}
+          value={draft.scope} onChange={(e) => set({ scope: e.target.value })}>
           {LEVELS.map((l) => <option key={l.scope} value={l.scope}>{l.label}</option>)}
         </select>
       </div>
-      {series('attendance', attEl, setAttEl, 'Attendance series')}
-      {series('screened', scrEl, setScrEl, 'TB screening series')}
-    </>
+      <button type="button" id="tb-load" className={`btn sm${dirty ? '' : ' secondary'}`}
+        disabled={loading || !dirty} onClick={() => setApplied(draft)}>
+        {loading ? 'Loading…' : 'Load'}
+      </button>
+      <button type="button" id="tb-series" className="btn ghost sm ms-auto"
+        aria-expanded={openSeries} onClick={() => setOpenSeries((v) => !v)}>
+        {openSeries ? 'Hide series' : 'Series'}
+      </button>
+    </div>
   );
+
+  const seriesPanel = (openSeries || data?.needsChoice || data?.inconsistent) ? (
+    <div style={{ padding: '.625rem .75rem', marginBottom: '.75rem',
+      border: '1px solid rgba(4,32,69,.12)', borderRadius: 'var(--tblr-border-radius)' }}>
+      {denominator()}
+      {numerator()}
+      {dirty && (
+        <div className="text-secondary" style={{ fontSize: '.6875rem', marginTop: '.5rem' }}>
+          Press Load to draw the chart from these.
+        </div>
+      )}
+    </div>
+  ) : null;
 
   /* Every branch renders through the same wrapper, and the wrapper carries the
      ref. A ref that only mounts on the branch holding the chart is a ref that
      is null when the observer goes looking for it - the effect runs once, on a
      first render where the component is still loading - so the chart keeps the
      fallback width for the life of the page. */
-  const shell = (body) => <div ref={wrap}>{picker}{body}</div>;
+  const shell = (body) => <div ref={wrap}>{picker}{seriesPanel}{body}</div>;
 
   if (loading && !data) {
     return shell(
@@ -269,7 +341,8 @@ export default function TbScreening() {
       <div className="empty" style={{ padding: '1.25rem 0 .5rem' }}>
         <div className="empty-icon"><IconAlert size={28} /></div>
         <div className="empty-subtitle" style={{ marginBottom: '.75rem' }}>{error}</div>
-        <button type="button" className="btn secondary sm" onClick={load}>Try again</button>
+        <button type="button" className="btn secondary sm"
+          onClick={() => load(query)}>Try again</button>
       </div>
     );
   }
@@ -278,6 +351,11 @@ export default function TbScreening() {
 
   const { attendance, screened, notScreened, rate } = data;
   const nothing = !data.reported || !attendance;
+  /* A numerator larger than its denominator is not a share, and a ring drawn
+     from it is not a part-to-whole: it is a full circle of blue with the red
+     silently gone, over a percentage above 100. So the ring is refused and the
+     two counts are shown as what they are, next to the control that fixes it. */
+  const impossible = data.inconsistent;
   const age = data.ageProfile || { available: false, bands: [], total: 0 };
   const ageTotal = age.bands.reduce((a, b) => a + b.value, 0) + (age.unclassified || 0);
   const hasAge = age.available && ageTotal > 0;
@@ -315,7 +393,13 @@ export default function TbScreening() {
   const subRoom = 2 * Math.sqrt(Math.max(0, INNER_RI * INNER_RI - (subSize * 1.6) ** 2));
   const subText = textWidth('screened for TB', subSize) <= subRoom ? 'screened for TB' : 'screened';
 
-  const screenedDeg = nothing ? 0 : (screened / attendance) * 360;
+  /* Clamped, and not only because the impossible case is caught above. An arc
+     of 2747 degrees is not a slice: `arc` treats anything past a full turn as
+     the whole circle, so the ring comes out solid blue with the red slice
+     silently absent and nothing on screen says the number was wrong. A ring
+     that cannot exceed a full turn cannot tell that lie. */
+  const screenedDeg = nothing ? 0
+    : Math.max(0, Math.min(360, (screened / attendance) * 360));
 
   const slices = [
     { key: 'screened', label: 'Screened for TB', short: 'Screened', value: screened,
@@ -332,6 +416,14 @@ export default function TbScreening() {
              colour: AGE_RAMP[i % AGE_RAMP.length], from, to: cursor };
   });
 
+  /* The white gap between slices is a stroke, so it eats into both of them.
+     At two pixels that is nothing on a slice fifty pixels wide and everything
+     on a slice four pixels wide, where it removes the slice: a screening rate
+     of one percent then has no blue in the ring at all. So the divider never
+     takes more than a third of the slice it borders. */
+  const strokeFor = (from, to, ro) =>
+    Math.max(0.4, Math.min(2, (ro * ((to - from) * Math.PI)) / 180 / 3));
+
   /** The point at radius r on a slice's mid-angle, where its label sits. */
   const at = (r, from, to) => {
     const d = (((from + to) / 2 - 90) * Math.PI) / 180;
@@ -340,13 +432,6 @@ export default function TbScreening() {
 
   return shell(
     <>
-      {data.inconsistent && (
-        <div className="alert warn" style={{ marginTop: '.75rem' }}>
-          More people were recorded as screened than attended over {data.periodLabel}.
-          One of the two 033B elements is likely unfiled; the share below is not reliable.
-        </div>
-      )}
-
       {data.needsChoice ? (
         <div className="alert warn" style={{ marginTop: '.75rem' }}>
           {data.candidates.cached} HMIS 033B elements are cached, but none is named
@@ -360,6 +445,35 @@ export default function TbScreening() {
         <div className="empty" style={{ padding: '1.5rem 0 .5rem' }}>
           <div className="empty-subtitle">
             No 033B attendance was reported for {data.orgUnit.name} over {data.periodLabel}.
+          </div>
+        </div>
+      ) : impossible ? (
+        <div>
+          <div className="alert error">
+            <strong>{nf(screened)} screened out of {nf(attendance)} attendances</strong> is
+            {' '}{rate === null ? 'more than everyone' : `${Math.round(rate)}%`}, so this is
+            not a share and it is not drawn. The numerator is right and the denominator is
+            short: total OPD attendance is more than one line of the form, and only
+            {' '}{(data.elements.attendance || []).length === 1 ? 'one is' : 'some are'}
+            {' '}counted here.
+          </div>
+          <div className="datagrid" style={{ gap: '.75rem 1.5rem', marginTop: '.75rem' }}>
+            <div>
+              <div className="page-pretitle">Numerator · screened for TB</div>
+              <div className="stat-value is-primary" style={{ fontSize: '1.5rem' }}>{nf(screened)}</div>
+              <div className="stat-foot">{data.elements.screened?.label}</div>
+            </div>
+            <div>
+              <div className="page-pretitle">Denominator · counted so far</div>
+              <div className="stat-value is-danger" style={{ fontSize: '1.5rem' }}>{nf(attendance)}</div>
+              <div className="stat-foot">
+                {(data.elements.attendance || []).map((e) => e.label).join(' + ') || 'nothing'}
+              </div>
+            </div>
+          </div>
+          <div className="stat-foot">
+            Open Series above and tick every line total OPD attendance is made of, then
+            press Load. {data.periodLabel} · {data.orgUnit.name}
           </div>
         </div>
       ) : (
@@ -384,7 +498,7 @@ export default function TbScreening() {
                     onMouseLeave={() => setHover(null)}>
                     <title>{`${a.label}: ${nf(a.value)} (${share} of 105:01 attendance)`}</title>
                     <path d={arc(C, C, OUTER_R, OUTER_RI, a.from, a.to)} fill={a.colour}
-                      stroke="#fff" strokeWidth="2" />
+                      stroke="#fff" strokeWidth={strokeFor(a.from, a.to, OUTER_R)} />
                     {lines && <Label x={lx} y={ly} lines={lines} fill={inkOn(a.colour)} />}
                   </g>
                 );
@@ -409,7 +523,7 @@ export default function TbScreening() {
                     onMouseEnter={() => setHover(s.key)} onMouseLeave={() => setHover(null)}>
                     <title>{`${s.label}: ${nf(s.value)} (${share} of attendance)`}</title>
                     <path d={arc(C, C, INNER_R, INNER_RI, s.from, s.to)} fill={s.colour}
-                      stroke="#fff" strokeWidth="2" />
+                      stroke="#fff" strokeWidth={strokeFor(s.from, s.to, INNER_R)} />
                     {lines && <Label x={lx} y={ly} lines={lines} fill={inkOn(s.colour)} />}
                   </g>
                 );
@@ -437,15 +551,17 @@ export default function TbScreening() {
                   style={{ padding: '.3125rem 0', fontSize: '.8125rem' }}
                   onMouseEnter={() => setHover(s.key)} onMouseLeave={() => setHover(null)}>
                   <span style={{ width: 10, height: 10, borderRadius: 3, background: s.colour, flex: 'none' }} />
-                  <span style={{ color: 'var(--tblr-body-color)' }}>{s.label}</span>
-                  <span className="ms-auto fw-bold" style={{ color: s.colour }}>{nf(s.value)}</span>
+                  <span style={{ color: 'var(--tblr-body-color)', minWidth: 0, flex: 1 }}>{s.label}</span>
+                  <span className="fw-bold" style={{ color: s.colour, flex: 'none',
+                    paddingLeft: '.75rem', whiteSpace: 'nowrap' }}>{nf(s.value)}</span>
                 </div>
               ))}
               <div className="d-flex items-center gap-2"
                 style={{ padding: '.4375rem 0 0', marginTop: '.25rem', fontSize: '.8125rem',
                   borderTop: '1px solid rgba(4,32,69,.1)' }}>
-                <span className="fw-medium">Total attendance</span>
-                <span className="ms-auto fw-bold">{nf(attendance)}</span>
+                <span className="fw-medium" style={{ minWidth: 0, flex: 1 }}>Total attendance</span>
+                <span className="fw-bold" style={{ flex: 'none', paddingLeft: '.75rem',
+                  whiteSpace: 'nowrap' }}>{nf(attendance)}</span>
               </div>
             </div>
 
@@ -460,8 +576,9 @@ export default function TbScreening() {
                     onMouseEnter={() => setHover(`age-${a.key}`)} onMouseLeave={() => setHover(null)}>
                     <span style={{ width: 10, height: 10, borderRadius: 3,
                       background: a.colour, flex: 'none' }} />
-                    <span style={{ color: 'var(--tblr-body-color)' }}>{a.label}</span>
-                    <span className="ms-auto fw-medium">{nf(a.value)}</span>
+                    <span style={{ color: 'var(--tblr-body-color)', minWidth: 0, flex: 1 }}>{a.label}</span>
+                    <span className="fw-medium" style={{ flex: 'none', paddingLeft: '.75rem',
+                      whiteSpace: 'nowrap' }}>{nf(a.value)}</span>
                   </div>
                 ))}
                 {age.unclassified > 0 && (

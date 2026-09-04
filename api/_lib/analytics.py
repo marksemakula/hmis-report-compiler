@@ -806,6 +806,35 @@ def _pick(chosen: str, options: list, what: str):
     return options[0] if options else None
 
 
+def _pick_many(chosen: str, options: list, what: str) -> list:
+    """The elements to add together, or [] if nothing matched.
+
+    More than one, because the total this card divides by is not always one
+    line of the form. The Uganda OPD register counts new attendance and
+    re-attendance on separate lines and their sum is what "total OPD
+    attendance" means; the outer ring of this same card already adds OA01 and
+    OA02 for exactly that reason. A denominator restricted to a single line
+    cannot say it, and a share taken against half a denominator reads as twice
+    the truth - which is the shape of a screening rate over 100%.
+
+    Ids arrive comma separated. Each is validated on its own so a typo names
+    itself rather than silently dropping out of the sum.
+    """
+    ids = [c.strip() for c in str(chosen or "").split(",") if c.strip()]
+    if not ids:
+        return options[:1]
+    out = []
+    for cid in ids:
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9]{10}", cid):
+            raise RuntimeError(
+                f"Unrecognised {what} element '{cid}'. Check the parameter; it must be "
+                "one of the ids returned by /api/py/tb-screening, or several of them "
+                "separated by commas.")
+        out.append(next((o for o in options if o["id"] == cid),
+                        {"id": cid, "label": "Selected element"}))
+    return out
+
+
 # The outer ring of the screening figure: 105:01 attendance by age band,
 # cumulative from January.
 #
@@ -908,7 +937,7 @@ def tb_screening(scope: str = "facility", year: int = None, attendance: str = ""
             "cached DHIS2 metadata predates this report. Set DHIS2_USERNAME and "
             "DHIS2_PASSWORD (or DHIS2_PAT) and run Refresh metadata in the admin page.")
 
-    att_el = _pick(attendance, options["attendance"] or options["all"], "attendance")
+    att_els = _pick_many(attendance, options["attendance"] or options["all"], "attendance")
     scr_el = _pick(screened, options["screened"] or options["all"], "TB screening")
 
     today = date.today()
@@ -923,7 +952,8 @@ def tb_screening(scope: str = "facility", year: int = None, attendance: str = ""
         "year": year,
         "throughWeek": through,
         "periodLabel": f"Weeks 1 to {through}, {year}",
-        "elements": {"attendance": att_el, "screened": scr_el},
+        # attendance is a list: the denominator may be several lines added up.
+        "elements": {"attendance": att_els, "screened": scr_el},
         "candidates": options,
         # True when this file could not tell which element is which. The figures
         # are withheld rather than guessed, and the caller offers the 033B list.
@@ -955,10 +985,12 @@ def tb_screening(scope: str = "facility", year: int = None, attendance: str = ""
                 "rate": None, "reported": False, "inconsistent": False,
                 "weeksReported": 0, "weeksElapsed": through}
 
+    att_ids = [e["id"] for e in att_els]
     weeks = [f"{year}W{w}" for w in range(1, through + 1)]
-    res = query([att_el["id"], scr_el["id"]], ou["id"], ";".join(weeks), session=session)
+    res = query(sorted(set(att_ids + [scr_el["id"]])), ou["id"], ";".join(weeks),
+                session=session)
 
-    totals = {att_el["id"]: 0.0, scr_el["id"]: 0.0}
+    totals = {i: 0.0 for i in att_ids + [scr_el["id"]]}
     reported_weeks = set()
     for row in res["rows"]:
         v = _num(row.get("value"))
@@ -969,13 +1001,18 @@ def tb_screening(scope: str = "facility", year: int = None, attendance: str = ""
         if m:
             reported_weeks.add(int(m.group(2)))
 
-    att = totals[att_el["id"]]
+    # The denominator is the sum of every line chosen for it. An element named
+    # twice is counted once: the ids are de-duplicated above, so a repeated
+    # choice cannot inflate the total it is meant to describe.
+    att = sum(totals[i] for i in set(att_ids))
     scr = totals[scr_el["id"]]
     reported = bool(reported_weeks)
 
-    # More screened than attended cannot be true. It happens when one element
-    # was filed and the other was not, and it must not be drawn as a slice
-    # larger than the pie.
+    # More screened than attended cannot be true, and the share it produces is
+    # not a share. It happens when the denominator is one line of a total that
+    # takes several, or when one of the two elements went unfiled. Either way
+    # it must not be drawn as a slice larger than the pie, so the flag travels
+    # with the figures and the card refuses the ring rather than drawing 763%.
     inconsistent = reported and scr > att
 
     return {

@@ -573,6 +573,22 @@ input[type="checkbox"], input[type="radio"] {
   cursor: pointer;
 }
 input[type="file"] { padding: .3125rem 1rem .3125rem .3125rem; }
+
+/* A compact control and its label, for a filter row sitting above a chart.
+   Full-size fields are right on a form, where the field is the subject. On a
+   card whose subject is the chart, a stack of them takes the space the chart
+   is there to use, so the row shrinks and the chart keeps the card. */
+input.sm, select.sm, textarea.sm, .form-control.sm, .form-select.sm {
+  padding: .3125rem .625rem;
+  font-size: .8125rem;
+  line-height: 1.125rem;
+}
+select.sm, .form-select.sm {
+  padding-right: 1.875rem;
+  background-position: right .5rem center;
+  background-size: 14px 10px;
+}
+.form-label.sm, label.sm { margin-bottom: .1875rem; font-size: .75rem; }
 input[type="file"]::file-selector-button {
   margin-right: .75rem;
   padding: .375rem .75rem;

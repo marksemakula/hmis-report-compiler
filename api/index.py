@@ -516,7 +516,11 @@ def tb_screening(scope: str = "facility", year: int = None, attendance: str = ""
 
     Both series are HMIS 033B, the weekly return, so the total is the sum of
     ISO weeks 1 to the current week. The response says how many of those weeks
-    actually reported."""
+    actually reported.
+
+    `attendance` takes one element id or several separated by commas, because
+    the total OPD attendance a screening share divides by is more than one line
+    on this form."""
     try:
         return analytics.tb_screening(scope=scope, year=year,
                                       attendance=attendance, screened=screened)

@@ -736,7 +736,7 @@ analytics.reset_cache()
 picked = analytics.tb_screening(scope="facility", year=2026, attendance="de033batt01",
                                 screened="de033btb001", session=ScreeningSession())
 check("the chosen attendance series is used",
-      picked["elements"]["attendance"]["id"], "de033batt01")
+      [e["id"] for e in picked["elements"]["attendance"]], ["de033batt01"])
 check("the candidates travel with the figures so the picker can offer them",
       len(picked["candidates"]["attendance"]), 1)
 try:
@@ -744,6 +744,56 @@ try:
     check("a malformed element is refused", True, False)
 except RuntimeError as exc:
     check("a malformed element is refused", "Check the parameter" in str(exc), True)
+
+print("\nThe denominator can be several lines, because a total often is")
+# Total OPD attendance is new attendance plus re-attendance on this form, so a
+# denominator that can only name one line is half a denominator, and a share
+# taken against half a denominator reads as twice the truth. That is what a
+# screening rate above 100% is made of.
+metadata._MAPPING["dataElements"]["HMIS033B"]["de033batt02"] = {
+    "name": "033B-AP02. OPD Re-attendance"}
+
+
+class TwoLineSession(ScreeningSession):
+    PER_WEEK = {"de033batt01": 200, "de033batt02": 140, "de033btb001": 255}
+
+
+analytics.reset_cache()
+one = analytics.tb_screening(scope="facility", year=2026, attendance="de033batt01",
+                             screened="de033btb001", session=TwoLineSession())
+check("one line alone is not the total", one["attendance"], 20 * 200)
+check("...so the share comes out over 100%", one["rate"] > 100, True)
+check("...and is flagged rather than drawn", one["inconsistent"], True)
+
+analytics.reset_cache()
+both = analytics.tb_screening(scope="facility", year=2026,
+                              attendance="de033batt01,de033batt02",
+                              screened="de033btb001", session=TwoLineSession())
+check("both lines add up to the total", both["attendance"], 20 * 340)
+check("...and the share is a share again", both["rate"], 75.0)
+check("...with the inconsistency gone", both["inconsistent"], False)
+check("both elements are named back, in order",
+      [e["id"] for e in both["elements"]["attendance"]],
+      ["de033batt01", "de033batt02"])
+check("the two slices still partition attendance",
+      both["screened"] + both["notScreened"], both["attendance"])
+
+# A line named twice is one line. Counting it twice would inflate the very
+# total it is meant to describe, and silently halve the share.
+analytics.reset_cache()
+dup = analytics.tb_screening(scope="facility", year=2026,
+                             attendance="de033batt01,de033batt01,de033batt02",
+                             screened="de033btb001", session=TwoLineSession())
+check("a repeated line is counted once", dup["attendance"], 20 * 340)
+
+try:
+    analytics.tb_screening(attendance="de033batt01,nope", session=TwoLineSession())
+    check("one bad id in a list is refused, not skipped", True, False)
+except RuntimeError as exc:
+    check("one bad id in a list is refused, not skipped", "'nope'" in str(exc), True)
+
+del metadata._MAPPING["dataElements"]["HMIS033B"]["de033batt02"]
+analytics.reset_cache()
 
 print("\nThe outer ring is 105:01 attendance by age band, cumulative from January")
 metadata._MAPPING["HMIS105_01_codeIndex"] = {"OA01": "sv6SeKroHPV", "OA02": "sQ4EexvvhVe"}
@@ -842,7 +892,7 @@ fixed = analytics.tb_screening(scope="facility", year=2026, attendance="de033bxx
                                screened="de033bxxx02", session=ScreeningSession())
 check("choosing both resolves it", fixed["needsChoice"], False)
 check("the chosen attendance element is used",
-      fixed["elements"]["attendance"]["id"], "de033bxxx01")
+      [e["id"] for e in fixed["elements"]["attendance"]], ["de033bxxx01"])
 
 print("\nAn empty 033B listing is the one case that really is a metadata problem")
 metadata._MAPPING["dataElements"] = {}
