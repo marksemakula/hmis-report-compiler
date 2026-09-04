@@ -506,70 +506,6 @@ def map_value_lookup(indicator: str, period: str, user: dict = Depends(current_u
         err(f"The district figures could not be read: {type(exc).__name__}", 502)
 
 
-# ---------------- TB screening share ----------------
-
-@app.get("/api/py/tb-screening")
-def tb_screening(scope: str = "facility", year: int = None, attendance: str = "",
-                 screened: str = "", user: dict = Depends(current_user)):
-    """Attendance split into screened and not screened for TB, cumulative from
-    the start of the year.
-
-    Both series are HMIS 033B, the weekly return, so the total is the sum of
-    ISO weeks 1 to the current week. The response says how many of those weeks
-    actually reported.
-
-    `attendance` takes one element id or several separated by commas, because
-    the total OPD attendance a screening share divides by is more than one line
-    on this form."""
-    try:
-        return analytics.tb_screening(scope=scope, year=year,
-                                      attendance=attendance, screened=screened)
-    except RuntimeError:
-        raise
-    except requests.HTTPError as exc:
-        err(f"DHIS2 rejected the analytics request: {exc}", 502)
-    except Exception as exc:
-        err(f"The screening figures could not be read: {type(exc).__name__}", 502)
-
-
-@app.get("/api/py/surveillance/deaths")
-def surveillance_deaths(scope: str = "facility", year: int = None,
-                        user: dict = Depends(current_user)):
-    """The four HMIS 033B death lines - maternal, macerated and fresh
-    stillbirth, and early neonatal - summed over ISO weeks 1 to the current
-    week.
-
-    A line the cached metadata cannot resolve comes back with a null value
-    rather than a zero: for a death count, nobody died and nobody knows are
-    opposite claims."""
-    try:
-        return analytics.perinatal_deaths(scope=scope, year=year)
-    except RuntimeError:
-        raise
-    except requests.HTTPError as exc:
-        err(f"DHIS2 rejected the analytics request: {exc}", 502)
-    except Exception as exc:
-        err(f"The death figures could not be read: {type(exc).__name__}", 502)
-
-
-@app.get("/api/py/mortality/inpatient")
-def inpatient_mortality(scope: str = "facility", year: int = None,
-                        user: dict = Depends(current_user)):
-    """Deaths as a share of admissions by month, against the 4% standard.
-
-    Both series are HMIS 108, the monthly inpatient return - CI03 over CI02 -
-    so the ratio is one the form itself supports. A month with no admissions
-    has no rate rather than a rate of zero."""
-    try:
-        return analytics.inpatient_mortality(scope=scope, year=year)
-    except RuntimeError:
-        raise
-    except requests.HTTPError as exc:
-        err(f"DHIS2 rejected the analytics request: {exc}", 502)
-    except Exception as exc:
-        err(f"The inpatient death rate could not be read: {type(exc).__name__}", 502)
-
-
 # ---------------- malaria channel ----------------
 
 @app.get("/api/py/malaria/elements")
@@ -620,7 +556,7 @@ def malaria_channel(element: str = "", scope: str = "facility", year: int = None
 # ---------------- mortality ----------------
 
 @app.get("/api/py/mortality")
-def mortality_summary(period: str, window: str = "ytd", scope: str = "facility",
+def mortality_summary(period: str, year: int = None, scope: str = "facility",
                       user: dict = Depends(current_user)):
     """Deaths against attendances for one period, and the causes behind them.
 
@@ -629,7 +565,7 @@ def mortality_summary(period: str, window: str = "ytd", scope: str = "facility",
     counted server-side and only the tally is returned - a certificate names
     the deceased, and none of it reaches the browser."""
     try:
-        return mortality.summary(period=period, window=window, scope=scope)
+        return mortality.summary(period=period, year=year, scope=scope)
     except RuntimeError:
         raise
     except requests.HTTPError as exc:

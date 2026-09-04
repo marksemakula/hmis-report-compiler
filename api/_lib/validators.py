@@ -148,6 +148,30 @@ def _pick_sheet(wb, expected_columns):
     return best if best is not None and best_hits >= 3 else None
 
 
+# --------------------------------------------------- reading a column by name
+# Every export spells the same column its own way - PatientNo, Patient No,
+# Patient Number - and the difference is only ever whitespace and case. Matching
+# on the literal string made a file that was right in substance fail on a space,
+# so columns are compared with the spacing and case taken out.
+def _key(name) -> str:
+    return re.sub(r"\s+", "", str(name or "")).lower()
+
+
+def _cells(row) -> dict:
+    """One row keyed by normalised column name, so 'Patient No' and 'PatientNo'
+    are the same column however the export spelled it."""
+    return {_key(k): v for k, v in (row or {}).items() if k}
+
+
+def _first(cells: dict, names):
+    """The first of these column names the row actually carries, or ''."""
+    for name in names:
+        value = cells.get(_key(name))
+        if value not in (None, ""):
+            return value
+    return ""
+
+
 # --- Raw EMR export adapter -------------------------------------------------
 # Jinja RRH's EMR exports one row per billed item (drug/test/service), so a
 # single OPD visit spans many rows and uses different column names than the
@@ -155,7 +179,32 @@ def _pick_sheet(wb, expected_columns):
 # export to one row per Visit No and rename columns to the template schema.
 # The published clean template lacks these columns, so it passes through
 # untouched.
-_RAW_EMR_MARKERS = {"Visit No", "All Diagnosis", "Visit Category"}
+#
+# The EMR does not name those columns the same way twice: its visit report
+# writes "All Diagnosis" and "Visit Category" where its diagnosis report writes
+# "Diagnosis" and "Visit Type". Matching one spelling meant the second export
+# fell straight through the adapter and then failed every required-field check
+# on every one of its ten thousand rows - five identical complaints per line
+# about columns the file had all along under other names. So the adapter looks
+# for the ROLE a column plays and accepts any spelling the EMR gives it.
+_EMR_COLUMNS = {
+    "VisitNo":       ["Visit No", "Visit Number"],
+    "PatientNo":     ["Patient No", "Patient Number", "Patient ID"],
+    "Sex":           ["Gender", "Sex"],
+    "Age":           ["Age"],
+    "VisitDate":     ["Visit Date", "Date of Visit"],
+    "VisitType":     ["Visit Category", "Visit Type", "Attendance Type"],
+    # Free text, not the EMR's own disease code: the 105 mapping is built and
+    # tested against the condition's name. "Disease Code" is deliberately absent.
+    "DiagnosisCode": ["All Diagnosis", "Diagnosis", "Diagnosis Name", "Disease"],
+}
+
+# A visit number alongside a named condition is unmistakably a raw export: the
+# clean template has no visit number, the 033B tally is two columns of code and
+# value, strata carries neither, and 108 is keyed on admission. Visit type is
+# not required to recognise one - where it is missing every visit counts as New,
+# which is what the collapse already assumes.
+_RAW_EMR_MARKERS = ("VisitNo", "DiagnosisCode")
 _EMR_SEX = {"Female": "F", "Male": "M", "F": "F", "M": "M"}
 _EMR_VISIT_TYPE = {
     "Consultation": "New", "Self Request": "New", "Refferal": "New", "Referral": "New",
@@ -176,7 +225,9 @@ def _emr_format_date(value):
 
 
 def _is_raw_emr(fieldnames):
-    return _RAW_EMR_MARKERS.issubset({str(f).strip() for f in fieldnames if f})
+    got = {_key(f) for f in (fieldnames or []) if f}
+    return all(any(_key(name) in got for name in _EMR_COLUMNS[role])
+               for role in _RAW_EMR_MARKERS)
 
 
 def _collapse_emr_visits(dict_rows):
@@ -193,24 +244,29 @@ def _collapse_emr_visits(dict_rows):
     """
     visits, order = {}, []
     for row in dict_rows:
-        vno = str(row.get("Visit No") or "").strip()
+        cells = _cells(row)
+
+        def column(role):
+            return _first(cells, _EMR_COLUMNS[role])
+
+        vno = str(column("VisitNo") or "").strip()
         key = vno if vno else "__row_%d" % len(order)
-        diagnosis = str(row.get("All Diagnosis") or "").strip()
+        diagnosis = str(column("DiagnosisCode") or "").strip()
         if key not in visits:
-            age = row.get("Age")
+            age = column("Age")
             try:
                 age = str(int(float(age))) if str(age).strip() not in ("", "None") else ""
             except (TypeError, ValueError):
                 age = str(age or "")
+            sex = str(column("Sex") or "").strip()
             visits[key] = {
-                "PatientNo": _emr_clean_patient_no(row.get("Patient No")),
+                "PatientNo": _emr_clean_patient_no(column("PatientNo")),
                 "Age": age,
                 "AgeUnit": "Years",
-                "Sex": _EMR_SEX.get(str(row.get("Gender") or "").strip(),
-                                    str(row.get("Gender") or "").strip()),
-                "VisitDate": _emr_format_date(row.get("Visit Date")),
+                "Sex": _EMR_SEX.get(sex, sex),
+                "VisitDate": _emr_format_date(column("VisitDate")),
                 "VisitType": _EMR_VISIT_TYPE.get(
-                    str(row.get("Visit Category") or "").strip(), "New"),
+                    str(column("VisitType") or "").strip(), "New"),
                 "_diagnoses": [],
             }
             order.append(key)
@@ -303,16 +359,6 @@ SHAPE_REPORT = {"SURV": "SURV", "STRATA": "OPD", "IPD": "IPD", "OPD": "OPD"}
 REPORT_SHAPES = {"OPD": ["OPD", "STRATA"], "IPD": ["IPD"], "SURV": ["SURV"]}
 
 
-def _key(name) -> str:
-    return re.sub(r"\s+", "", str(name or "")).lower()
-
-
-def _cells(row) -> dict:
-    """One row keyed by normalised column name, so 'Patient No' and 'PatientNo'
-    are the same column however the export spelled it."""
-    return {_key(k): v for k, v in (row or {}).items() if k}
-
-
 def identify_shape(fieldnames):
     """Which report's upload format these columns belong to, or None when the
     columns match nothing we know, in which case the ordinary per-row messages
@@ -375,6 +421,41 @@ def shape_mismatch(report_type: str, rows: list):
             f"Select {wants['short']}{when}, then upload it again.")
 
 
+# Columns the template names one thing and the registers another. Spacing and
+# case are handled for every column already, so only genuine synonyms are listed
+# here - the words a clerk would call the same column by.
+_COLUMN_SYNONYMS = {
+    "PatientNo":     ["Patient Number", "Patient ID"],
+    "Sex":           ["Gender"],
+    "VisitDate":     ["Date of Visit"],
+    "VisitType":     ["Visit Category", "Attendance Type"],
+    "DiagnosisCode": ["Diagnosis", "All Diagnosis", "Diagnosis Name"],
+    "AdmissionDate": ["Date of Admission"],
+    "DischargeDate": ["Date of Discharge"],
+    "Outcome":       ["Discharge Outcome"],
+}
+
+
+def _canonical_row(row: dict) -> dict:
+    """One row under the template's own column names, whatever the file called
+    them.
+
+    An export that names its columns Patient No, Gender and Visit Date holds
+    every field 105:01 asks for, and used to be told all five were missing, on
+    every row. The file's own columns are kept as well as renamed, because the
+    compilers downstream read columns beyond the required set."""
+    out = {str(k).strip(): ("" if v is None else str(v).strip())
+           for k, v in (row or {}).items() if k}
+    cells = {_key(k): v for k, v in out.items()}
+    for canonical in OPD_COLUMNS + IPD_COLUMNS + ["CountAttendance"]:
+        if out.get(canonical):
+            continue
+        value = _first(cells, [canonical] + _COLUMN_SYNONYMS.get(canonical, []))
+        if value != "":
+            out[canonical] = value
+    return out
+
+
 def validate_rows(report_type: str, rows: list, period: str):
     """Validate parsed rows. Returns (clean_rows, errors)."""
     m = mapping()
@@ -387,7 +468,7 @@ def validate_rows(report_type: str, rows: list, period: str):
     )
 
     for i, row in enumerate(rows, start=2):  # header is line 1
-        row = {str(k).strip(): str(v).strip() for k, v in row.items() if k}
+        row = _canonical_row(row)
         problems = []
 
         for field in required:

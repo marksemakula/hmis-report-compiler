@@ -49,6 +49,22 @@ PREGNANCY_CONTRIBUTED = "AJAraEcfH63"   # "Did the pregnancy contribute to the d
 WAS_PREGNANT = "zcn7acUB6x1"       # "For women, was the deceased pregnant?"
 STILLBORN = "ivnHp4M4hFF"          # "Stillborn?"
 
+# Sex and age are NOT pinned to a UID. Every other field here was read off the
+# live instance and confirmed; these two could not be, because the DHIS2 session
+# expired mid-investigation, and a UID guessed from a form layout is the kind of
+# mistake that reports a column of zeros without ever failing. They are resolved
+# from the program's own metadata by name instead, which is what should have
+# been done for the others too.
+SEX_NAME_RE = re.compile(r"\bsex\b", re.I)
+DOB_NAME_RE = re.compile(r"date of birth|\bdob\b", re.I)
+AGE_NAME_RE = re.compile(r"\bage\b", re.I)
+AGE_UNIT_RE = re.compile(r"\b(day|month|year)s?\b", re.I)
+
+# The Ministry's own OPD bands, spelled as the form spells them.
+AGE_BANDS = ["0-28 days", "29days - 4Yrs", "5 - 9Yrs", "10 - 19Yrs", "20Yrs & above"]
+SEX_VALUES = {"m": "Male", "male": "Male", "f": "Female", "female": "Female"}
+UNKNOWN = "Not recorded"
+
 TOP_N = 5
 MAX_EVENTS = 2000
 
@@ -117,6 +133,98 @@ def tidy_cause(raw: str) -> str:
     return " ".join(out)
 
 
+def demographic_fields(session=None) -> dict:
+    """Which elements on the certificate carry sex and age, found by name.
+
+    Returned rather than hidden so the card can say which fields it read: a
+    demographic ring drawn from the wrong element looks exactly like one drawn
+    from the right one."""
+    def produce():
+        s = analytics._session(session)
+        r = s.get(f"{analytics._base()}/api/programs/{mccod_program_id(session=session)}.json",
+                  params={"fields": "programStages[programStageDataElements"
+                                    "[dataElement[id,name,valueType]]]"}, timeout=30)
+        r.raise_for_status()
+        stages = r.json().get("programStages") or []
+        elements = []
+        for st in stages:
+            for pde in st.get("programStageDataElements") or []:
+                de = pde.get("dataElement") or {}
+                if de.get("id"):
+                    elements.append(de)
+
+        found = {"sex": None, "dob": None, "age": [], "names": {}}
+        for de in elements:
+            name = de.get("name") or ""
+            if found["sex"] is None and SEX_NAME_RE.search(name):
+                found["sex"] = de["id"]
+                found["names"]["sex"] = name
+            elif found["dob"] is None and DOB_NAME_RE.search(name):
+                found["dob"] = de["id"]
+                found["names"]["dob"] = name
+            elif AGE_NAME_RE.search(name) and de.get("valueType") in (
+                    "NUMBER", "INTEGER", "INTEGER_POSITIVE", "INTEGER_ZERO_OR_POSITIVE", "TEXT"):
+                unit = AGE_UNIT_RE.search(name)
+                found["age"].append({"id": de["id"], "name": name,
+                                     "unit": (unit.group(1).lower() if unit else "year")})
+        return found
+
+    return analytics._cached("mccod_demographics", produce)
+
+
+def band_for(days=None, years=None) -> str:
+    """The Ministry's band for an age.
+
+    Days first where they are known, because that is the only way to separate a
+    neonatal death from an infant one: an age recorded as 0 completed years is
+    anything from an hour old to eleven months, and putting all of it in
+    "29days - 4Yrs" would empty the first band and overstate the second."""
+    if days is not None:
+        if days <= 28:
+            return AGE_BANDS[0]
+        years = days / 365.25
+    if years is None:
+        return UNKNOWN
+    if years < 5:
+        # Without days, an age below one year cannot be split from the neonatal
+        # band; it is reported as the wider band rather than guessed into the
+        # narrower one.
+        return AGE_BANDS[1]
+    if years < 10:
+        return AGE_BANDS[2]
+    if years < 20:
+        return AGE_BANDS[3]
+    return AGE_BANDS[4]
+
+
+def _age_of(picked: dict, fields: dict, occurred: str):
+    """(days, years) for one certificate, or (None, None)."""
+    dob = picked.get(fields.get("dob"))
+    if dob and occurred:
+        try:
+            born = date.fromisoformat(str(dob)[:10])
+            died = date.fromisoformat(str(occurred)[:10])
+            days = (died - born).days
+            if days >= 0:
+                return days, days / 365.25
+        except ValueError:
+            pass
+    for entry in fields.get("age") or []:
+        raw = picked.get(entry["id"])
+        if raw in (None, ""):
+            continue
+        try:
+            value = float(str(raw).strip())
+        except ValueError:
+            continue
+        if entry["unit"] == "day":
+            return value, value / 365.25
+        if entry["unit"] == "month":
+            return value * 30.44, value / 12.0
+        return None, value
+    return None, None
+
+
 def _events(start: date, end: date, org_unit: str, session=None) -> list:
     """MCCOD events in the window, reduced to the two fields this module uses.
 
@@ -130,7 +238,9 @@ def _events(start: date, end: date, org_unit: str, session=None) -> list:
         "occurredAfter": start.isoformat(),
         "occurredBefore": end.isoformat(),
         "pageSize": str(MAX_EVENTS),
-        "fields": "dataValues[dataElement,value]",
+        # occurredAt is the date of death, which the age arithmetic needs; it
+        # is a date, not an identifier.
+        "fields": "occurredAt,dataValues[dataElement,value]",
     }, timeout=90)
     if r.status_code in (401, 403):
         raise RuntimeError(
@@ -141,12 +251,20 @@ def _events(start: date, end: date, org_unit: str, session=None) -> list:
     payload = r.json()
     raw = payload.get("instances") or payload.get("events") or []
 
+    fields = demographic_fields(session=session)
+    wanted = {UNDERLYING_CAUSE, PREGNANCY_CONTRIBUTED, WAS_PREGNANT, STILLBORN}
+    if fields.get("sex"):
+        wanted.add(fields["sex"])
+    if fields.get("dob"):
+        wanted.add(fields["dob"])
+    wanted.update(a["id"] for a in fields.get("age") or [])
+
     kept = []
     for ev in raw:
-        picked = {}
+        picked = {"_occurredAt": str(ev.get("occurredAt") or "")[:10]}
         for dv in ev.get("dataValues") or []:
             de = dv.get("dataElement")
-            if de in (UNDERLYING_CAUSE, PREGNANCY_CONTRIBUTED, WAS_PREGNANT, STILLBORN):
+            if de in wanted:
                 picked[de] = dv.get("value")
         kept.append(picked)
     return kept
@@ -199,30 +317,27 @@ def _denominator(period: str, org_unit: str, session=None) -> dict:
             "source": "105:01 attendance (OA01 + OA02)"}
 
 
-# How far back the bars reach. Year to date is the default because a rolling
-# quarter is too thin here: Jinja certified 101 causes in the whole of 2026 to
-# date, so thirteen weeks of them is a top five of threes and twos, and a bar
-# chart of threes and twos invites a reader to rank noise.
-WINDOWS = {
-    "ytd": "Since 1 January",
-    "13w": "Last 13 weeks",
-    "12m": "Last 12 months",
-    "24m": "Last 24 months",
-}
-DEFAULT_WINDOW = "ytd"
+# The filter is the year, because that is how a hospital reads its own
+# mortality: "so far this year", and last year beside it. A rolling quarter was
+# too thin - Jinja certified 101 causes in the whole of 2026 to date, so
+# thirteen weeks of them was a top five of threes and twos.
+FIRST_YEAR = 2020
 
 
-def _window_start(window: str, end: date) -> date:
-    if window == "13w":
-        return end - timedelta(weeks=13)
-    if window == "12m":
-        return date(end.year - 1, end.month, 1)
-    if window == "24m":
-        return date(end.year - 2, end.month, 1)
-    return date(end.year, 1, 1)
+def _year_bounds(year: int, today: date = None) -> tuple:
+    """1 January to the end of the year, or to today if the year is running."""
+    today = today or date.today()
+    start = date(year, 1, 1)
+    end = date(year, 12, 31)
+    return start, min(end, today) if year == today.year else end
 
 
-def summary(period: str, window: str = DEFAULT_WINDOW, scope: str = "facility",
+def available_years(today: date = None) -> list:
+    today = today or date.today()
+    return list(range(today.year, FIRST_YEAR - 1, -1))
+
+
+def summary(period: str, year: int = None, scope: str = "facility",
             session=None) -> dict:
     """Deaths and their causes for one period, with the rate they imply.
 
@@ -245,16 +360,33 @@ def summary(period: str, window: str = DEFAULT_WINDOW, scope: str = "facility",
             "(2026W35) or a month (202608).")
     start, end = bounds
 
-    window = (window or DEFAULT_WINDOW).lower()
-    if window not in WINDOWS:
-        raise RuntimeError(f"Unknown window '{window}'. Use one of: "
-                           + ", ".join(WINDOWS))
-    window_start = _window_start(window, end)
-    events = _events(window_start, end + timedelta(days=1), ou["id"], session=session)
+    today = date.today()
+    year = int(year or today.year)
+    if year not in available_years(today):
+        raise RuntimeError(
+            f"{year} is outside the years this chart covers "
+            f"({FIRST_YEAR} to {today.year}).")
+    window_start, window_end = _year_bounds(year, today)
+    events = _events(window_start, window_end + timedelta(days=1), ou["id"],
+                     session=session)
+
+    fields = demographic_fields(session=session)
+    by_sex, by_band = {}, {b: 0 for b in AGE_BANDS}
+    by_band[UNKNOWN] = 0
 
     all_cause, mpdsr = {}, {}
     certified = maternal_n = perinatal_n = 0
     for ev in events:
+        # The rings count every certificate in the year, not only the ones that
+        # name a cause: who died is known even where what they died of was left
+        # blank, and dropping those would understate the year by a third.
+        raw_sex = str(ev.get(fields.get("sex")) or "").strip()
+        sex = SEX_VALUES.get(raw_sex.lower(), raw_sex.title() if raw_sex else UNKNOWN)
+        by_sex[sex] = by_sex.get(sex, 0) + 1
+        days, years = _age_of(ev, fields, ev.get("_occurredAt"))
+        band = band_for(days, years)
+        by_band[band] = by_band.get(band, 0) + 1
+
         cause = tidy_cause(ev.get(UNDERLYING_CAUSE))
         if not cause:
             continue
@@ -285,10 +417,10 @@ def summary(period: str, window: str = DEFAULT_WINDOW, scope: str = "facility",
         "period": period,
         "periodLabel": periods.describe("Weekly" if periods.parse_week_period(period)
                                         else "Monthly", period),
-        "window": {"key": window, "label": WINDOWS[window],
-                   "from": window_start.isoformat(), "to": end.isoformat(),
-                   "days": (end - window_start).days},
-        "windows": [{"key": k, "label": v} for k, v in WINDOWS.items()],
+        "year": year,
+        "window": {"from": window_start.isoformat(), "to": window_end.isoformat(),
+                   "label": (f"{year} to date" if year == today.year else str(year))},
+        "years": available_years(today),
         "seen": seen,
         "deaths": period_deaths,
         # Per thousand attendances, which is how a facility death rate is read.
@@ -297,6 +429,20 @@ def summary(period: str, window: str = DEFAULT_WINDOW, scope: str = "facility",
         "denominatorSource": denom.get("source"),
         "allCause": _top(all_cause),
         "mpdsr": _top(mpdsr),
+        # The two rings: sex inside, age outside, both counting every
+        # certificate in the window.
+        "bySex": [{"label": k, "deaths": v}
+                  for k, v in sorted(by_sex.items(), key=lambda kv: (-kv[1], kv[0]))],
+        "byAgeBand": [{"label": b, "deaths": by_band.get(b, 0)}
+                      for b in AGE_BANDS + [UNKNOWN] if by_band.get(b, 0)],
+        "ageBands": AGE_BANDS,
+        # Which elements the demographics were read from, so a ring drawn off
+        # the wrong field can be spotted rather than believed.
+        "demographicFields": {
+            "sex": fields.get("names", {}).get("sex"),
+            "dateOfBirth": fields.get("names", {}).get("dob"),
+            "age": [a["name"] for a in fields.get("age") or []],
+        },
         "certifiedInWindow": certified,
         "mpdsrInWindow": sum(mpdsr.values()),
         # The split, because "MPDSR" over one bar chart says nothing about

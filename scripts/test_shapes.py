@@ -201,6 +201,78 @@ check("strata uploaded as 108 is refused", bool(strata_as_ipd), True)
 check_in("and points at 105:01", "select 105:01", strata_as_ipd)
 check("strata uploaded as 033B is refused", bool(shape_mismatch("SURV", STRATA)), True)
 
+print("\n-- a column is read by what it holds, not how it is spelled --")
+# The EMR names the same column differently from one report to the next. Its
+# visit report writes "All Diagnosis" and "Visit Category"; its diagnosis report
+# writes "Diagnosis" and "Visit Type". Matching one spelling sent a 10,004-row
+# July extract straight past the adapter and into validation, which complained
+# five times a row about columns the file had all along:
+#
+#     PatientNo is required; Sex is required; DiagnosisCode is required;
+#     VisitDate is required; VisitType is required
+#
+# Unlike the week-35 case above this file IS the right file for the report, so
+# shape_mismatch stays silent - correctly, because the shape is OPD. The fault
+# was entirely in the spelling.
+CLINICMASTER = ["Visit No", "Patient No", "Reference No", "Gender", "Birth Date",
+                "Age", "Age Category", "Surname", "First Name", "Other Name",
+                "Visit Date", "Disease Code", "Diagnosis", "Disease Category",
+                "Visit Type", "Action Point"]
+EMR_VISITS = ["Visit No", "Patient No", "Gender", "Age", "Visit Date",
+              "Visit Category", "All Diagnosis"]
+
+check("the diagnosis export is recognised as a raw EMR file",
+      validators._is_raw_emr(CLINICMASTER), True)
+check("and so is the visit export it used to be the only one of",
+      validators._is_raw_emr(EMR_VISITS), True)
+check("the clean 105:01 template is left alone",
+      validators._is_raw_emr(OPD_COLUMNS), False)
+check("so is a 033B tally", validators._is_raw_emr(["Code", "Value"]), False)
+check("so is a strata file",
+      validators._is_raw_emr(extract_scripts.strata_columns()), False)
+check("and so is a 108 extract", validators._is_raw_emr(IPD_COLUMNS), False)
+
+CM_CSV = (
+    ",".join(CLINICMASTER) + "\n"
+    "V1,1234.0,R1,Female,1990-01-01,36,Adult,A,B,C,2026-07-03 00:00:00,1A00,"
+    "MALARIA,Infectious,Consultation,x\n"
+    "V1,1234.0,R1,Female,1990-01-01,36,Adult,A,B,C,2026-07-03 00:00:00,CA23,"
+    "ASTHMA,Respiratory,Consultation,x\n"
+    "V2,999,R2,Male,2000-01-01,26,Adult,D,E,F,2026-07-04 00:00:00,1A00,"
+    "MALARIA,Infectious,Follow up,x\n"
+).encode()
+collapsed = validators.parse_file("105July2026.csv", CM_CSV)
+
+check("two conditions at one visit stay two rows", len(collapsed), 3)
+check("the patient number loses its spreadsheet decimal",
+      collapsed[0]["PatientNo"], "1234")
+check("Gender becomes Sex", collapsed[0]["Sex"], "F")
+check("Visit Date becomes VisitDate", collapsed[0]["VisitDate"], "2026-07-03")
+check("Diagnosis becomes DiagnosisCode", collapsed[0]["DiagnosisCode"], "MALARIA")
+check("Visit Type becomes VisitType", collapsed[0]["VisitType"], "New")
+check("and a follow-up is a re-attendance", collapsed[2]["VisitType"], "Re-attendance")
+# The Ministry counts every condition recorded, but a visit is one attendance
+# however many conditions were recorded at it.
+check("the visit is counted once", [r["CountAttendance"] for r in collapsed],
+      ["1", "0", "1"])
+check("the EMR's own disease code is not mistaken for the HMIS code",
+      any(r["DiagnosisCode"] in ("1A00", "CA23") for r in collapsed), False)
+
+# The same tolerance at the validation step, for a file that never went through
+# the EMR adapter: what matters is that the required fields are found, not that
+# the diagnosis maps - the code index is stubbed empty in these checks.
+spelled_differently = rows(
+    ["Patient No", "Visit Date", "Age", "AgeUnit", "Gender", "Diagnosis", "Visit Type"],
+    ("P0001", "2026-07-03", "34", "Years", "F", "EP01c", "New"),
+)
+_, spelled_errors = validators.validate_rows("OPD", spelled_differently, "202607")
+missing = [p for e in spelled_errors for p in e["problems"] if "is required" in p]
+check("no column is called missing when the file spells it differently", missing, [])
+
+# And the week-35 message must not regress into silence: a tally has none of
+# these columns under any spelling.
+check("a 033B tally still matches nothing", identify_shape(["Code", "Value"]), "SURV")
+
 print("\n-- the route asks before it validates --")
 with open(os.path.join(HERE, "..", "api", "index.py")) as f:
     source = f.read()

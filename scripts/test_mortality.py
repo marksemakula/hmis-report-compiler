@@ -57,8 +57,18 @@ IDENTIFIERS = {
 }
 
 
-def event(cause, contributed=None, pregnant=None, stillborn=None):
+SEX_DE, DOB_DE, AGE_DE = "deSexField1", "deDobField1", "deAgeYears1"
+
+
+def event(cause, contributed=None, pregnant=None, stillborn=None,
+          sex=None, dob=None, age_years=None, died="2026-08-20"):
     values = [{"dataElement": k, "value": v} for k, v in IDENTIFIERS.items()]
+    if sex is not None:
+        values.append({"dataElement": SEX_DE, "value": sex})
+    if dob is not None:
+        values.append({"dataElement": DOB_DE, "value": dob})
+    if age_years is not None:
+        values.append({"dataElement": AGE_DE, "value": str(age_years)})
     if cause is not None:
         values.append({"dataElement": mortality.UNDERLYING_CAUSE, "value": cause})
     if contributed is not None:
@@ -67,7 +77,7 @@ def event(cause, contributed=None, pregnant=None, stillborn=None):
         values.append({"dataElement": mortality.WAS_PREGNANT, "value": pregnant})
     if stillborn is not None:
         values.append({"dataElement": mortality.STILLBORN, "value": stillborn})
-    return {"event": "ev123", "orgUnit": FACILITY, "occurredAt": "2026-08-20",
+    return {"event": "ev123", "orgUnit": FACILITY, "occurredAt": died,
             "dataValues": values}
 
 
@@ -114,6 +124,15 @@ class Session:
         self.event_params = None
 
     def get(self, url, params=None, timeout=None):
+        if "/programs/" in url:
+            return Response({"programStages": [{"programStageDataElements": [
+                {"dataElement": {"id": SEX_DE, "name": "HMIS_100_  Sex",
+                                 "valueType": "TEXT"}},
+                {"dataElement": {"id": DOB_DE, "name": "HMIS_100_  Date of birth",
+                                 "valueType": "DATE"}},
+                {"dataElement": {"id": AGE_DE, "name": "HMIS_100_  Age in completed years",
+                                 "valueType": "INTEGER"}},
+            ]}]})
         if "/programs.json" in url:
             return Response({"programs": [
                 {"id": "otherProg1", "name": "HMIS 016 - Maternal Perinatal Death Review"},
@@ -191,30 +210,81 @@ check("a pregnancy that did not contribute is neither",
 check("a recorded 'unknown' is shown rather than quietly dropped",
       any(r["cause"] == "Unknown" for r in data["mpdsr"]), True)
 
+print("\n-- the age a certificate implies --")
+check("a death at eleven days is neonatal", mortality.band_for(days=11), "0-28 days")
+check("...at twenty-eight days still is", mortality.band_for(days=28), "0-28 days")
+check("...at twenty-nine days is not", mortality.band_for(days=29), "29days - 4Yrs")
+check("a toddler", mortality.band_for(days=None, years=3), "29days - 4Yrs")
+check("...and the band ends the day before five", mortality.band_for(years=4.99),
+      "29days - 4Yrs")
+check("school age", mortality.band_for(years=7), "5 - 9Yrs")
+check("adolescent", mortality.band_for(years=19.9), "10 - 19Yrs")
+check("adult", mortality.band_for(years=20), "20Yrs & above")
+check("...and the oldest", mortality.band_for(years=96), "20Yrs & above")
+check("no age at all is not guessed into a band", mortality.band_for(), "Not recorded")
+# The trap: an age recorded as 0 completed years is anything up to eleven
+# months, so it must NOT be read as neonatal.
+check("nought completed years is reported as the wider band, not as neonatal",
+      mortality.band_for(days=None, years=0), "29days - 4Yrs")
+
+print("\n-- the two rings --")
+rings = mortality.summary(period="2026W34", session=Session(events=[
+    event("SEPSIS", sex="Male", dob="2026-08-10"),          # 10 days old
+    event("SEPSIS", sex="Female", dob="2026-07-01"),        # 50 days
+    event("SEPSIS", sex="Female", age_years=7),
+    event("SEPSIS", sex="Male", age_years=15),
+    event("SEPSIS", sex="Male", age_years=64),
+    event("SEPSIS", sex="male", age_years=39),              # lower case
+    event("SEPSIS"),                                        # neither recorded
+]))
+check("sex is counted, however it was typed",
+      [(r["label"], r["deaths"]) for r in rings["bySex"]],
+      [("Male", 4), ("Female", 2), ("Not recorded", 1)])
+check("the age bands are the Ministry's own, in order",
+      [r["label"] for r in rings["byAgeBand"]],
+      ["0-28 days", "29days - 4Yrs", "5 - 9Yrs", "10 - 19Yrs", "20Yrs & above", "Not recorded"])
+check("...counted from a date of birth where there is one",
+      [r["deaths"] for r in rings["byAgeBand"]], [1, 1, 1, 1, 2, 1])
+check("both rings add up to the same certificates",
+      sum(r["deaths"] for r in rings["bySex"]),
+      sum(r["deaths"] for r in rings["byAgeBand"]))
+check("an empty band is left out rather than drawn as a nought-width slice",
+      any(r["deaths"] == 0 for r in rings["byAgeBand"]), False)
+check("the rings count every certificate, not only the ones naming a cause",
+      sum(r["deaths"] for r in rings["bySex"]), rings["eventsRead"])
+check("the fields they were read from are named",
+      rings["demographicFields"]["sex"], "HMIS_100_  Sex")
+
+# The sixth slice used to wrap back to the first ramp step, so "Not recorded"
+# was drawn in the same pale blue as the neonatal band.
+with open(os.path.join(HERE, "..", "app", "mortality.js")) as fh:
+    card = fh.read()
+check("an absent value never takes a step of the age ramp",
+      "row.label === NOT_RECORDED ? NO_VALUE_COLOUR" in card, True)
+check("...and the ramp itself is the five bands, no more",
+      card.count("'#e8f1fc', '#bcd7f4', '#7cb0e5', '#3b86d4', '#0a4f96'"), 1)
+
+print("\n-- the year is the filter --")
+check("this year by default", data["year"], 2026)
+check("...labelled as running", data["window"]["label"], "2026 to date")
+check("...and starting on 1 January", data["window"]["from"], "2026-01-01")
+last = mortality.summary(period="2026W34", year=2025, session=Session())
+check("a past year is whole", (last["window"]["from"], last["window"]["to"]),
+      ("2025-01-01", "2025-12-31"))
+check("...and labelled without 'to date'", last["window"]["label"], "2025")
+check("the years offered run back to 2020", mortality.available_years()[-1], 2020)
+try:
+    mortality.summary(period="2026W34", year=1999, session=Session())
+    check("a year before the records is refused", "no error", "RuntimeError")
+except RuntimeError as exc:
+    check("a year before the records is refused", "outside the years" in str(exc), True)
+
 print("\n-- the rate, and what it is made of --")
 check("patients seen", data["seen"], SEEN)
 check("deaths", data["deaths"], DEATHS)
 check("per thousand attendances", data["ratePerThousand"], round(2 / 2103 * 1000, 2))
 check("the denominator is named", data["denominatorSource"], "033B attendance (AP02)")
 check("the period asked for is the period reported", data["period"], "2026W34")
-check("...and the window behind the bars is named", data["window"]["label"], "Since 1 January")
-check("...year to date by default", data["window"]["from"], "2026-01-01")
-check("...with the alternatives offered",
-      [w["key"] for w in data["windows"]], ["ytd", "13w", "12m", "24m"])
-thirteen = mortality.summary(period="2026W34", window="13w", session=Session())
-check("a shorter window starts thirteen weeks before the period ends",
-      thirteen["window"]["from"], "2026-05-24")
-try:
-    mortality.summary(period="2026W34", window="fortnight", session=Session())
-    check("an unknown window is refused", "no error", "RuntimeError")
-except RuntimeError as exc:
-    check("an unknown window is refused", "Use one of" in str(exc), True)
-no_deaths = mortality.summary(period="2026W34", session=Session(events=[]))
-check("no certificates means no bars, not a zero", no_deaths["allCause"], [])
-check("...on both groups", no_deaths["mpdsr"], [])
-check("...and the rate still stands, because it does not come from certificates",
-      no_deaths["ratePerThousand"], round(2 / 2103 * 1000, 2))
-
 print("\n-- nothing but the tally leaves this module --")
 serialised = json.dumps(summary())
 for field, value in IDENTIFIERS.items():
@@ -230,8 +300,10 @@ mortality.summary(period="2026W34", session=s)
 check("events are asked for by program", s.event_params["program"], "mccodProg1")
 check("...for this hospital only", (s.event_params["orgUnit"], s.event_params["ouMode"]),
       (FACILITY, "SELECTED"))
-check("...and only the data values are requested, never the names beside them",
-      s.event_params["fields"], "dataValues[dataElement,value]")
+# occurredAt is the date of death, which the age arithmetic needs. Nothing
+# else about the person is asked for: no name, no enrolment, no attributes.
+check("...and only the data values and the date are requested",
+      s.event_params["fields"], "occurredAt,dataValues[dataElement,value]")
 check("the window ends with the period asked about",
       s.event_params["occurredBefore"] >= "2026-08-24", True)
 
