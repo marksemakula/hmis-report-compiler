@@ -23,6 +23,15 @@ export function describeError(status, body, fallback = 'Request failed') {
 
   const detail = body && body.detail;
 
+  /* "Not Found" is FastAPI's word for an unmatched route, not for absent data.
+     Passed through it sends a reader looking for missing records when the
+     cause is a server running an older build than the page calling it. */
+  if (status === 404 && (!detail || String(detail).trim() === 'Not Found')) {
+    return 'That endpoint is not on the server that answered, which happens when the '
+      + 'running build is older than this page. Restart the API server, or redeploy, '
+      + 'and reload.';
+  }
+
   if (typeof detail === 'string' && detail.trim()) return detail;
 
   if (Array.isArray(detail)) {
@@ -144,4 +153,28 @@ export const SCOPE_LEVELS = [
  *  current year runs to the current week and a past one to its last. */
 export function yearLabel(year, currentYear) {
   return year === currentYear ? `${year} · year to date` : `${year} · full year`;
+}
+
+/* An API failure said in a way the reader can act on.
+ *
+ * A 404 from these endpoints is never "the data is missing". It is "this route
+ * does not exist on the server that answered", and there is one thing that
+ * causes it: the running build predates the endpoint. FastAPI's own word for
+ * it is "Not Found", which sends a reader hunting for absent data instead of
+ * restarting a stale server, so it is replaced here rather than shown.
+ */
+export function apiFailure(path, status, body, what = 'The figures') {
+  if (status === 404) {
+    return `${path} is not on the server that answered. That endpoint belongs to a `
+      + 'newer build than the one running, so restart the API server, or redeploy, '
+      + 'and reload this page.';
+  }
+  const detail = body && body.detail;
+  if (typeof detail === 'string' && detail.trim() && detail.trim() !== 'Not Found') {
+    return detail.trim();
+  }
+  if (status === 401 || status === 403) {
+    return `${what} could not be read: the signed-in account is not permitted to (HTTP ${status}).`;
+  }
+  return `${what} could not be read (HTTP ${status}).`;
 }

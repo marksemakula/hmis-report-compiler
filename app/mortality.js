@@ -1,7 +1,8 @@
 'use client';
-import { useCallback, useEffect, useState } from 'react';
-import { isoWeek, weekLabel } from './lib';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { isoWeek, weekLabel, SCOPE_LEVELS, yearLabel, apiFailure } from './lib';
 import { IconAlert } from './icons';
+import useWidth from './usewidth';
 
 /* Deaths, against the people seen, and what they died of.
  *
@@ -20,6 +21,29 @@ import { IconAlert } from './icons';
  */
 const ALL_CAUSE = '#066fd1';
 const MPDSR = '#0ca678';
+
+/* The inpatient death rate against the hospital's standard.
+ *
+ * The measure is CI03 over CI02 - deaths over admissions, both HMIS 108, both
+ * the monthly inpatient return - so the ratio is one the form itself supports.
+ * A death count over OPD attendances, which is what this card used to show,
+ * divides a ward number by a door number.
+ *
+ * A line against a baseline, not two lines. Admissions run in the thousands
+ * and deaths in the tens, so plotting both on one axis flattens deaths into
+ * the floor, and giving them a second axis invents a correlation out of where
+ * the two scales happen to be pinned. The rate IS deaths against admissions,
+ * on one axis, and both raw counts read in the tooltip and the footer.
+ *
+ * Blue for the rate, red for a month over the standard: 23.4 apart in the
+ * worst colour-vision case, and a month over is also labelled with its figure,
+ * so the breach never rests on colour. The standard itself is a recessive gray
+ * rule, dashed and named, so it reads as a limit rather than a third series -
+ * the ordinary gridlines are solid hairlines for the same reason. */
+const RATE = '#066fd1';
+const OVER = '#d63939';
+const STANDARD_RULE = '#6b7280';
+
 
 const nf = (n) => (n === null || n === undefined ? null : Number(n).toLocaleString('en-GB'));
 
@@ -181,28 +205,193 @@ function Demographics({ data }) {
   );
 }
 
+/** Anchor a tooltip to a column, flipping it inboard near either edge. */
+function tipShift(percent) {
+  return percent > 72 ? 'translateX(-100%)' : percent < 18 ? 'translateX(0)' : 'translateX(-50%)';
+}
+
+const TIP = {
+  position: 'absolute', top: 0, pointerEvents: 'none',
+  background: '#fff', border: '1px solid rgba(4,32,69,.1)', borderRadius: 6,
+  boxShadow: '0 16px 24px 2px rgba(0,0,0,.07)', padding: '.4rem .5rem',
+  fontSize: '.6875rem', whiteSpace: 'nowrap', zIndex: 2,
+};
+
+/* Deaths as a share of admissions, month by month, against the standard.
+ *
+ * One measure on one axis. The y scale starts at zero because a rate is a
+ * magnitude and a truncated baseline exaggerates every wobble in it; it ends
+ * above whichever is larger, the standard or the worst month, so the standard
+ * is always on the chart even in a good year and a breach is never off the
+ * top of it.
+ *
+ * Only two points are labelled: the last month, and the worst month when that
+ * is a different one and it is over the standard. A number on every point is
+ * chaos and goes unread; the crosshair carries the rest. */
+function RateTrend({ months, standard }) {
+  const box = useRef(null);
+  const W = useWidth(box, 360);
+  const [hover, setHover] = useState(null);
+
+  const points = (months || []).filter((m) => m.rate !== null && m.rate !== undefined);
+  if (points.length === 0) {
+    return (
+      <div className="text-secondary" style={{ fontSize: '.75rem' }}>
+        No month has both an admission and a death figure, so no rate can be drawn.
+      </div>
+    );
+  }
+
+  const H = 132;
+  const padL = 30, padR = 12, padT = 12, padB = 20;
+  const plotW = Math.max(40, W - padL - padR);
+  const plotH = H - padT - padB;
+
+  const worst = points.reduce((a, b) => (b.rate > a.rate ? b : a), points[0]);
+  const top = Math.max(standard, worst.rate) * 1.25 || 1;
+  const xOf = (i) => (points.length === 1
+    ? padL + plotW / 2
+    : padL + (plotW / (points.length - 1)) * i);
+  const yOf = (v) => padT + plotH - (Math.min(v, top) / top) * plotH;
+
+  // Three gridlines, solid hairlines. The standard gets its own rule, dashed
+  // and labelled, so it does not read as a fourth gridline.
+  const ticks = [0, top / 2, top].map((v) => Math.round(v * 10) / 10);
+  const last = points[points.length - 1];
+  const labelled = new Set([last.period]);
+  if (worst.overStandard && worst.period !== last.period) labelled.add(worst.period);
+  const active = hover === null ? null : points[hover];
+
+  return (
+    <div ref={box} style={{ position: 'relative' }}>
+      <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H}
+        style={{ width: '100%', height: `${H}px`, display: 'block' }} role="img"
+        aria-label={`Deaths as a share of admissions by month, against a standard of ${standard}% or less`}>
+        {ticks.map((v) => (
+          <g key={v}>
+            <line x1={padL} x2={W - padR} y1={yOf(v)} y2={yOf(v)}
+              stroke="#e5e7eb" strokeWidth="1" />
+            <text x={padL - 6} y={yOf(v) + 3.5} textAnchor="end" fontSize="9" fill="#6b7280">
+              {v}%
+            </text>
+          </g>
+        ))}
+
+        {/* The standard. Dashed and named, because it is a limit rather than
+            a reading, and a solid rule at this weight reads as a series. */}
+        <line x1={padL} x2={W - padR} y1={yOf(standard)} y2={yOf(standard)}
+          stroke={STANDARD_RULE} strokeWidth="1.5" strokeDasharray="4 3" />
+        {/* Named at the left, where no endpoint label lands. Every label on
+            this plot carries a surface halo as well: the standard rule and the
+            line it judges necessarily sit close together in a good year, and a
+            figure printed straight over a dash is unreadable. */}
+        <text x={padL + 2} y={yOf(standard) - 4} textAnchor="start" fontSize="9"
+          fill={STANDARD_RULE} stroke="#fff" strokeWidth="3" paintOrder="stroke">
+          Standard {standard}%
+        </text>
+
+        <path d={points.map((p, i) => `${i ? 'L' : 'M'}${xOf(i)},${yOf(p.rate)}`).join('')}
+          fill="none" stroke={RATE} strokeWidth="2"
+          strokeLinecap="round" strokeLinejoin="round" />
+
+        {points.map((p, i) => (
+          <g key={p.period}>
+            {/* A 2px surface ring keeps a marker legible where it sits on the
+                line and widens the target at the same time. */}
+            <circle cx={xOf(i)} cy={yOf(p.rate)} r={hover === i ? 5 : 4}
+              fill={p.overStandard ? OVER : RATE} stroke="#fff" strokeWidth="2" />
+            {labelled.has(p.period) && (
+              <text x={xOf(i)} y={yOf(p.rate) - 9}
+                textAnchor={i === 0 ? 'start' : i === points.length - 1 ? 'end' : 'middle'}
+                fontSize="10" fontWeight="700" fill={p.overStandard ? OVER : '#111827'}
+                stroke="#fff" strokeWidth="3" paintOrder="stroke">
+                {p.rate}%
+              </text>
+            )}
+            {(points.length <= 6 || i % 2 === 0 || i === points.length - 1) && (
+              <text x={xOf(i)} y={H - 6} textAnchor="middle" fontSize="9" fill="#6b7280">
+                {p.short}
+              </text>
+            )}
+            <rect x={xOf(i) - plotW / Math.max(1, points.length - 1) / 2} y={padT}
+              width={plotW / Math.max(1, points.length - 1)} height={plotH} fill="transparent"
+              onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)} />
+          </g>
+        ))}
+      </svg>
+
+      {active && (() => {
+        const p = (xOf(hover) / W) * 100;
+        return (
+          <div style={{ ...TIP, left: `${p}%`, transform: tipShift(p) }}>
+            <div className="fw-bold">{active.label}</div>
+            <div style={{ color: active.overStandard ? OVER : 'inherit' }}>
+              {active.rate}% of admissions{active.overStandard ? ' · over standard' : ''}
+            </div>
+            <div className="text-secondary">
+              {nf(active.deaths)} deaths (CI03) of {nf(active.admissions)} admissions (CI02)
+            </div>
+          </div>
+        );
+      })()}
+    </div>
+  );
+}
+
+/* Which week the causes are counted up to.
+ *
+ * The current year ends at the week just finished, because this week is still
+ * being filled in and a count taken halfway through one reads as a collapse in
+ * deaths. A past year ends at its own last week, not at whatever week today
+ * happens to be. */
+function endWeekOf(year, currentYear) {
+  const y = Number(year);
+  if (!y || y === currentYear) {
+    const [wy, ww] = isoWeek(new Date(Date.now() - 7 * 86400000));
+    return `${wy}W${ww}`;
+  }
+  return `${y}W${weeksInYear(y)}`;
+}
+
 export default function Mortality({ scope = 'facility' }) {
+  /* Level and Year are one set of filters behind one Load button, the same as
+     the two cards to the left. The year is how a hospital reads its own
+     mortality - so far this year, and last year beside it - and it drives both
+     halves of this card: the inpatient rate and the certificates. Two controls
+     that each fired their own request would leave the two halves describing
+     different years while a reader was still deciding what to ask. */
+  const START = { scope, year: '' };
+  const [draft, setDraft] = useState(START);
+  const [applied, setApplied] = useState(START);
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
-  /* The year, which is how a hospital reads its own mortality: so far this
-     year, and last year beside it. A rolling quarter was too thin - 101 causes
-     were certified in the whole of 2026 to date. */
-  const [chosenYear, setChosenYear] = useState(null);
+  // The rate and the certificates are two returns - 108 monthly, and the
+  // MCCOD events - so they are two requests. Folding them into one would make
+  // the causes wait on a series they have nothing to do with.
+  const [ip, setIp] = useState(null);
+  const [ipError, setIpError] = useState('');
 
   /* The week just finished: this week is still being filled in, and a rate
      computed halfway through one reads as a collapse in deaths. */
-  const [year, week] = isoWeek(new Date(Date.now() - 7 * 86400000));
-  const period = `${year}W${week}`;
+  const [wkYear, wkWeek] = isoWeek(new Date(Date.now() - 7 * 86400000));
+  const period = `${wkYear}W${wkWeek}`;
 
-  const load = useCallback(async () => {
+  const years = ip?.years || data?.years || [];
+  const currentYear = ip?.currentYear ?? years[0];
+  const causeQuery = `period=${period}${applied.year ? `&year=${applied.year}` : ''}`
+    + `&scope=${applied.scope}`;
+  const rateQuery = `scope=${applied.scope}${applied.year ? `&year=${applied.year}` : ''}`;
+  const dirty = JSON.stringify(draft) !== JSON.stringify(applied);
+  const busy = loading || ip === null;
+
+  const load = useCallback(async (qs) => {
     setLoading(true);
     setError('');
     try {
-      const qs = chosenYear ? `&year=${chosenYear}` : '';
-      const r = await fetch(`/api/py/mortality?period=${period}${qs}&scope=${scope}`);
+      const r = await fetch(`/api/py/mortality?${qs}`);
       const b = await r.json().catch(() => null);
-      if (!r.ok) throw new Error(b?.detail || `Mortality could not be read (HTTP ${r.status}).`);
+      if (!r.ok) throw new Error(apiFailure('/api/py/mortality', r.status, b, 'Mortality'));
       setData(b);
     } catch (e) {
       setData(null);
@@ -210,39 +399,94 @@ export default function Mortality({ scope = 'facility' }) {
     } finally {
       setLoading(false);
     }
-  }, [period, chosenYear, scope]);
+  }, []);
 
-  useEffect(() => { load(); }, [load]);
+  const loadRate = useCallback(async (qs) => {
+    setIpError('');
+    try {
+      const r = await fetch(`/api/py/mortality/inpatient?${qs}`);
+      const b = await r.json().catch(() => null);
+      if (!r.ok) throw new Error(apiFailure('/api/py/mortality/inpatient', r.status, b, 'The death rate'));
+      setIp(b);
+    } catch (e) {
+      setIp(null);
+      setIpError(e.message);
+    }
+  }, []);
+
+  useEffect(() => { load(causeQuery); }, [load, causeQuery]);
+  useEffect(() => { loadRate(rateQuery); }, [loadRate, rateQuery]);
+
+  const set = (patch) => setDraft((d) => ({ ...d, ...patch }));
+
+  const picker = (
+    <div style={{ display: 'flex', alignItems: 'flex-end', gap: '.5rem',
+      flexWrap: 'wrap', margin: '.375rem 0 .5rem' }}>
+      <div style={{ minWidth: 0 }}>
+        <label className="form-label sm" htmlFor="mort-level">Level</label>
+        <select id="mort-level" className="sm" style={{ width: 'auto', minWidth: '9rem' }}
+          value={draft.scope} onChange={(e) => set({ scope: e.target.value })}>
+          {SCOPE_LEVELS.map((l) => <option key={l.scope} value={l.scope}>{l.label}</option>)}
+        </select>
+      </div>
+      <div style={{ minWidth: 0 }}>
+        <label className="form-label sm" htmlFor="mort-period">Period</label>
+        {years.length ? (
+          <select id="mort-period" className="sm" style={{ width: 'auto', minWidth: '10rem' }}
+            value={draft.year || String(ip?.year || data?.year || '')}
+            onChange={(e) => set({ year: e.target.value })}>
+            {years.map((y) => <option key={y} value={y}>{yearLabel(y, currentYear)}</option>)}
+          </select>
+        ) : (
+          <select id="mort-period" className="sm" disabled
+            style={{ width: 'auto', minWidth: '10rem' }}>
+            <option>Reading…</option>
+          </select>
+        )}
+      </div>
+      <button type="button" id="mort-load" className={`btn sm${dirty ? '' : ' secondary'}`}
+        disabled={busy || !dirty} onClick={() => setApplied(draft)}>
+        {busy ? 'Loading…' : 'Load'}
+      </button>
+    </div>
+  );
+
+  const shell = (body) => (
+    <div className="card">
+      <div className="card-body">
+        <div className="page-pretitle">Mortality</div>
+        {picker}
+        {body}
+      </div>
+    </div>
+  );
 
   if (loading && !data) {
-    return (
-      <div className="card">
-        <div className="card-body">
-          <div className="loading-bar" style={{ marginBottom: '.75rem' }} />
-          <div className="text-secondary" style={{ fontSize: '.75rem' }}>
-            Reading death certificates from DHIS2…
-          </div>
+    return shell(
+      <>
+        <div className="loading-bar" style={{ marginBottom: '.75rem' }} />
+        <div className="text-secondary" style={{ fontSize: '.75rem' }}>
+          Reading death certificates from DHIS2…
         </div>
-      </div>
+      </>
     );
   }
 
   if (error) {
-    return (
-      <div className="card">
-        <div className="card-body">
-          <div className="d-flex items-center gap-2" style={{ marginBottom: '.5rem' }}>
-            <IconAlert size={18} />
-            <span className="fw-medium">Mortality unavailable</span>
-          </div>
-          <div className="text-secondary" style={{ fontSize: '.75rem', marginBottom: '.5rem' }}>{error}</div>
-          <button type="button" className="btn secondary sm" onClick={load}>Try again</button>
+    return shell(
+      <>
+        <div className="d-flex items-center gap-2" style={{ marginBottom: '.5rem' }}>
+          <IconAlert size={18} />
+          <span className="fw-medium">Mortality unavailable</span>
         </div>
-      </div>
+        <div className="text-secondary" style={{ fontSize: '.75rem', marginBottom: '.5rem' }}>{error}</div>
+        <button type="button" className="btn secondary sm"
+          onClick={() => load(causeQuery)}>Try again</button>
+      </>
     );
   }
 
-  if (!data) return null;
+  if (!data) return shell(null);
 
   const max = Math.max(
     1,
@@ -250,42 +494,75 @@ export default function Mortality({ scope = 'facility' }) {
     ...(data.mpdsr || []).map((r) => r.deaths),
   );
 
-  return (
-    <div className="card">
-      <div className="card-body">
-        <div className="d-flex items-center gap-2" style={{ marginBottom: '.25rem' }}>
-          <span className="page-pretitle">Mortality</span>
-          <span className="text-secondary ms-auto" style={{ fontSize: '.6875rem' }}>
-            {weekLabel(Number(String(data.period).slice(0, 4)),
-              Number(String(data.period).slice(5)))}
-          </span>
-        </div>
-
-        {/* The rate is the headline; the two counts under it are what the rate
-            is made of, because a rate with no denominator cannot be checked. */}
-        <div className="d-flex items-baseline gap-2">
-          <span className="stat-value">
-            {data.ratePerThousand === null || data.ratePerThousand === undefined
-              ? 'no rate' : data.ratePerThousand}
-          </span>
-          <span className="text-secondary" style={{ fontSize: '.75rem' }}>per 1,000 seen</span>
-        </div>
-        <div className="stat-foot" style={{ marginBottom: '.6rem' }}>
-          {data.deaths === null || data.deaths === undefined
-            ? 'Deaths not reported for this week'
-            : `${nf(data.deaths)} death${data.deaths === 1 ? '' : 's'} of ${nf(data.seen) || 'unknown'} seen`}
-        </div>
+  return shell(
+      <>
+        {/* The rate is the headline and the standard is stated beside it: a
+            rate with nothing to measure it against is a number nobody can act
+            on. The two counts under it are what the rate is made of, because a
+            rate with no denominator cannot be checked. */}
+        {ipError ? (
+          /* Loud, not a footnote. A trend that quietly fails to appear is
+             indistinguishable from one nobody built. */
+          <div className="alert error" style={{ marginBottom: '.6rem' }}>
+            <div style={{ marginBottom: '.4rem' }}>{ipError}</div>
+            <button type="button" className="btn secondary sm"
+              onClick={() => loadRate(rateQuery)}>Try again</button>
+          </div>
+        ) : !ip ? (
+          <div className="loading-bar" style={{ margin: '.5rem 0 .75rem' }} />
+        ) : (
+          <>
+            <div className="d-flex items-baseline gap-2" style={{ flexWrap: 'wrap' }}>
+              <span className={`stat-value${ip.withinStandard === false ? ' is-danger' : ''}`}>
+                {ip.rate === null || ip.rate === undefined ? '—' : `${ip.rate}%`}
+              </span>
+              <span className="text-secondary" style={{ fontSize: '.75rem' }}>of admissions</span>
+              {ip.withinStandard !== null && ip.withinStandard !== undefined && (
+                /* The verdict in a word as well as a colour, because a badge
+                   whose only content is a hue is not readable by everyone. */
+                <span className={`badge ${ip.withinStandard ? 'ok' : 'bad'} ms-auto`}>
+                  {ip.withinStandard ? 'Within standard' : 'Over standard'}
+                </span>
+              )}
+            </div>
+            <div className="stat-foot">
+              Standard: {ip.standard}% or less of total admissions
+            </div>
+            <div className="stat-foot" style={{ marginBottom: '.5rem' }}>
+              {ip.resolved === false
+                ? 'HMIS 108 CI02 and CI03 are not in the cached metadata, so no rate can be drawn.'
+                : ip.deaths === null
+                  ? `No 108 admission or death figure for ${ip.periodLabel}`
+                  : `${nf(ip.deaths)} death${ip.deaths === 1 ? '' : 's'} (CI03) of `
+                    + `${nf(ip.admissions)} admission${ip.admissions === 1 ? '' : 's'} (CI02)`
+                    + ` · ${ip.periodLabel}`}
+              {ip.monthsOverStandard > 0 && (
+                <> · <span className="fw-medium" style={{ color: OVER }}>
+                  {ip.monthsOverStandard} month{ip.monthsOverStandard === 1 ? '' : 's'} over
+                </span></>
+              )}
+            </div>
+            {ip.resolved !== false && (
+              <div style={{ marginBottom: '.6rem' }}>
+                <div className="text-secondary"
+                  style={{ fontSize: '.6875rem', marginBottom: '.15rem' }}>
+                  CI03 deaths as a share of CI02 admissions, by month
+                </div>
+                <RateTrend months={ip.months} standard={ip.standard} />
+              </div>
+            )}
+          </>
+        )}
 
         <div style={{ borderTop: '1px solid var(--tblr-border-color)', paddingTop: '.5rem',
           marginBottom: '.6rem' }}>
+          {/* The year that used to be chosen here is the Period control at the
+              top of the card now: one year for both halves, so the rate and
+              the certificates can never describe different ones. */}
           <div className="d-flex items-center gap-2" style={{ marginBottom: '.5rem' }}>
-            <label htmlFor="mort-year" className="text-secondary"
-              style={{ fontSize: '.6875rem', marginBottom: 0 }}>Year</label>
-            <select id="mort-year" value={data.year}
-              onChange={(e) => setChosenYear(Number(e.target.value))}
-              style={{ fontSize: '.6875rem', padding: '.15rem .4rem', width: 'auto' }}>
-              {(data.years || []).map((y) => <option key={y} value={y}>{y}</option>)}
-            </select>
+            <span className="text-secondary" style={{ fontSize: '.6875rem' }}>
+              Death certificates
+            </span>
             <span className="text-secondary ms-auto" style={{ fontSize: '.6875rem' }}>
               {data.eventsRead} certificates in {data.window?.label}
             </span>
@@ -326,12 +603,13 @@ export default function Mortality({ scope = 'facility' }) {
             not know that these are certificates rather than the inpatient
             register will read the bars as the whole of the hospital's deaths. */}
         <div className="text-secondary" style={{ fontSize: '.6875rem', marginTop: '.6rem' }}>
-          Causes from the medical certificates of cause of death (HMIS 100); the rate from
-          {' '}{data.denominatorSource}. The MPDSR review forms carry no coded cause at this
-          hospital, so those bars are drawn from the certificates themselves: deaths a
-          pregnancy contributed to, and stillbirths.
+          Causes from the medical certificates of cause of death (HMIS 100); the rate
+          {' '}from HMIS 108, CI03 deaths over CI02 admissions. The MPDSR review forms
+          carry no coded cause at this hospital, so those bars are drawn from the
+          certificates themselves: deaths a pregnancy contributed to, and stillbirths.
+          Certificates run to {weekLabel(Number(String(data.period).slice(0, 4)),
+            Number(String(data.period).slice(5)))}.
         </div>
-      </div>
-    </div>
+      </>
   );
 }

@@ -1,7 +1,7 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
 import { IconAlert } from './icons';
-import { SCOPE_LEVELS, yearLabel } from './lib';
+import { SCOPE_LEVELS, yearLabel, apiFailure } from './lib';
 
 /* The four death lines of HMIS 033B, cumulative from week 1.
  *
@@ -66,7 +66,7 @@ export default function PerinatalDeaths({ scope = 'facility' }) {
     try {
       const r = await fetch(`/api/py/surveillance/deaths?${qs}`);
       const b = await r.json().catch(() => null);
-      if (!r.ok) throw new Error(b?.detail || `Death figures unavailable (HTTP ${r.status}).`);
+      if (!r.ok) throw new Error(apiFailure('/api/py/surveillance/deaths', r.status, b, 'The death figures'));
       setData(b);
     } catch (e) {
       setData(null);

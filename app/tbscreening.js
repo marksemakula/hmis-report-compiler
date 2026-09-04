@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { IconAlert } from './icons';
 import useWidth from './usewidth';
-import { SCOPE_LEVELS, yearLabel } from './lib';
+import { SCOPE_LEVELS, yearLabel, apiFailure } from './lib';
 
 /* Attendance split by whether the patient was screened for TB, counted from
  * the start of the year.
@@ -223,7 +223,7 @@ export default function TbScreening() {
     try {
       const r = await fetch(`/api/py/tb-screening?${qs}`);
       const b = await r.json().catch(() => null);
-      if (!r.ok) throw new Error(b?.detail || `Screening figures unavailable (HTTP ${r.status}).`);
+      if (!r.ok) throw new Error(apiFailure('/api/py/tb-screening', r.status, b, 'The screening figures'));
       setData(b);
     } catch (e) {
       setData(null);

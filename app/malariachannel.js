@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import useWidth from './usewidth';
 import { IconAlert } from './icons';
+import { apiFailure } from './lib';
 
 /* The malaria channel.
  *
@@ -310,53 +311,69 @@ function Channel({ data }) {
   );
 }
 
+/** What the four controls add up to, as the query they produce. */
+const asQuery = (q) => {
+  const p = new URLSearchParams({
+    scope: q.scope === 'other' ? 'facility' : q.scope,
+    baseline: String(q.baseline),
+  });
+  if (q.scope === 'other' && q.ou) p.set('ou', q.ou);
+  if (q.element) p.set('element', q.element);
+  return p.toString();
+};
+
 export default function MalariaChannel({ scope: initialScope = 'facility' }) {
   const [data, setData] = useState(null);
-  const [element, setElement] = useState('');
-  const [baseline, setBaseline] = useState(5);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   /* The chart opens on this hospital, which is the question asked of it most
      days, and the other three answers are one control away: the region, the
      country, and any single facility in Busoga. `ou` is only set for that last
-     case and takes precedence over the scope on the server. */
-  const [scope, setScope] = useState(initialScope);
-  const [ou, setOu] = useState('');
+     case and takes precedence over the scope on the server.
+
+     Two copies of the four controls, and one Load, the same as every other
+     card on this page. Four controls that each fired their own request is four
+     DHIS2 queries for one question, and a reader who changes Where and then
+     Baseline watches the chart redraw twice from a combination they never
+     asked for. */
+  const START = { scope: initialScope, ou: '', element: '', baseline: 5 };
+  const [draft, setDraft] = useState(START);
+  const [applied, setApplied] = useState(START);
   const [scopeList, setScopeList] = useState([]);
   const [facilities, setFacilities] = useState([]);
   const [facilityText, setFacilityText] = useState('');
+  // The series pickers are a correction, not a daily filter, so they fold away.
+  const [openSeries, setOpenSeries] = useState(false);
 
-  const load = useCallback(async () => {
+  const query = asQuery(applied);
+  const dirty = query !== asQuery(draft);
+  // A facility scope with no facility named would draw this hospital again
+  // under the label "another facility", which is worse than an empty control.
+  const incomplete = draft.scope === 'other' && !draft.ou;
+
+  const load = useCallback(async (qs) => {
     setLoading(true);
     setError('');
     try {
-      const qs = new URLSearchParams({
-        scope: scope === 'other' ? 'facility' : scope,
-        baseline: String(baseline),
-      });
-      if (scope === 'other' && ou) qs.set('ou', ou);
-      if (element) qs.set('element', element);
-      const r = await fetch(`/api/py/malaria/channel?${qs.toString()}`);
+      const r = await fetch(`/api/py/malaria/channel?${qs}`);
       const b = await r.json().catch(() => null);
-      if (!r.ok) throw new Error(b?.detail || `The channel could not be built (HTTP ${r.status}).`);
+      if (!r.ok) throw new Error(apiFailure('/api/py/malaria/channel', r.status, b, 'The channel'));
       setData(b);
-      if (!element && b?.element?.id) setElement(b.element.id);
     } catch (e) {
       setData(null);
       setError(e.message);
     } finally {
       setLoading(false);
     }
-  }, [scope, ou, element, baseline]);
+  }, []);
 
-  /* Do not fetch a facility-scoped channel with no facility chosen yet: it
-     would draw this hospital again under the label "another facility", which
-     is worse than an empty control. */
   useEffect(() => {
-    if (scope === 'other' && !ou) return;
-    load();
-  }, [load, scope, ou]);
+    if (applied.scope === 'other' && !applied.ou) return;
+    load(query);
+  }, [load, query, applied.scope, applied.ou]);
+
+  const set = (patch) => setDraft((d) => ({ ...d, ...patch }));
 
   /* The three standing scopes, named by the server so the region reads
      "Busoga" rather than a word this file guessed. */
@@ -372,19 +389,19 @@ export default function MalariaChannel({ scope: initialScope = 'facility' }) {
   /* Six hundred names, fetched once and only when someone actually asks for
      another facility. */
   useEffect(() => {
-    if (scope !== 'other' || facilities.length) return undefined;
+    if (draft.scope !== 'other' || facilities.length) return undefined;
     let live = true;
     fetch('/api/py/malaria/facilities')
       .then((r) => (r.ok ? r.json() : null))
       .then((b) => { if (live && b?.facilities) setFacilities(b.facilities); })
       .catch(() => {});
     return () => { live = false; };
-  }, [scope, facilities.length]);
+  }, [draft.scope, facilities.length]);
 
   const pickFacility = (text) => {
     setFacilityText(text);
     const hit = facilities.find((f) => f.name.toLowerCase() === text.trim().toLowerCase());
-    setOu(hit ? hit.id : '');
+    set({ ou: hit ? hit.id : '' });
   };
 
   const years = useMemo(() => [3, 5, 7, 10], []);
@@ -415,28 +432,34 @@ export default function MalariaChannel({ scope: initialScope = 'facility' }) {
 
   return (
     <>
-      <div className="map-filters" style={{ marginBottom: '1rem' }}>
-        <div>
-          <label htmlFor="mc-scope">Where</label>
-          <select id="mc-scope" value={scope}
-            onChange={(e) => { setScope(e.target.value); if (e.target.value !== 'other') setOu(''); }}>
+      {/* One compact line: where, over how long, and Load. The two hints that
+          used to sit under the selects say what was already chosen, so they
+          read under the chart instead of pushing it down the card, and the
+          case-series picker folds away because it is a correction rather than
+          a daily filter. */}
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: '.5rem',
+        flexWrap: 'wrap', marginBottom: '.5rem' }}>
+        <div style={{ minWidth: 0 }}>
+          <label className="form-label sm" htmlFor="mc-scope">Where</label>
+          <select id="mc-scope" className="sm" style={{ width: 'auto', minWidth: '11rem' }}
+            value={draft.scope}
+            onChange={(e) => set({ scope: e.target.value,
+              ou: e.target.value === 'other' ? draft.ou : '' })}>
             {(scopeList.length ? scopeList : [{ scope: 'facility', short: 'This hospital' }])
-              .map((s) => <option key={s.scope} value={s.scope}>{s.short || s.name}</option>)}
-            <option value="other">Another facility in the region</option>
+              .map((sc) => <option key={sc.scope} value={sc.scope}>{sc.short || sc.name}</option>)}
+            <option value="other">Another facility</option>
           </select>
-          {scope !== 'other' && (
-            <div className="form-hint">{data.orgUnit?.name}</div>
-          )}
         </div>
 
-        {scope === 'other' && (
-          <div>
-            <label htmlFor="mc-facility">Facility</label>
+        {draft.scope === 'other' && (
+          <div style={{ minWidth: 0 }}>
+            <label className="form-label sm" htmlFor="mc-facility">Facility</label>
             {/* A list of six hundred is a search box, not a dropdown. The input
                 holds a name and `ou` holds the id only once a name matches one
                 exactly, so a half-typed name cannot be charted as somewhere
                 else. */}
-            <input id="mc-facility" list="mc-facility-list" value={facilityText}
+            <input id="mc-facility" className="sm" list="mc-facility-list"
+              style={{ width: 'auto', minWidth: '13rem' }} value={facilityText}
               placeholder={facilities.length
                 ? `Search ${facilities.length} facilities`
                 : 'Reading the facility list…'}
@@ -444,31 +467,53 @@ export default function MalariaChannel({ scope: initialScope = 'facility' }) {
             <datalist id="mc-facility-list">
               {facilities.map((f) => <option key={f.id} value={f.name} />)}
             </datalist>
-            <div className="form-hint">
-              {ou ? data.orgUnit?.name : 'Pick a facility to draw its channel.'}
-            </div>
           </div>
         )}
 
-        {data.elements?.length > 1 && (
-          <div>
-            <label htmlFor="mc-element">Case series</label>
-            <select id="mc-element" value={element} onChange={(e) => setElement(e.target.value)}>
-              {data.elements.map((e) => <option key={e.id} value={e.id}>{e.label}</option>)}
-            </select>
-          </div>
-        )}
-        <div>
-          <label htmlFor="mc-baseline">Baseline</label>
-          <select id="mc-baseline" value={baseline} onChange={(e) => setBaseline(Number(e.target.value))}>
+        <div style={{ minWidth: 0 }}>
+          <label className="form-label sm" htmlFor="mc-baseline">Baseline</label>
+          <select id="mc-baseline" className="sm" style={{ width: 'auto', minWidth: '9.5rem' }}
+            value={draft.baseline}
+            onChange={(e) => set({ baseline: Number(e.target.value) })}>
             {years.map((y) => <option key={y} value={y}>{y} previous years</option>)}
           </select>
-          <div className="form-hint">
-            {data.baselineYears?.[0]}–{data.baselineYears?.[data.baselineYears.length - 1]},
-            excluding {data.year} itself
-          </div>
         </div>
+
+        <button type="button" id="mc-load" className={`btn sm${dirty ? '' : ' secondary'}`}
+          disabled={loading || !dirty || incomplete} onClick={() => setApplied(draft)}>
+          {loading ? 'Loading…' : 'Load'}
+        </button>
+
+        {data.elements?.length > 1 && (
+          <button type="button" id="mc-series" className="btn ghost sm ms-auto"
+            aria-expanded={openSeries} onClick={() => setOpenSeries((v) => !v)}>
+            {openSeries ? 'Hide series' : 'Series'}
+          </button>
+        )}
       </div>
+
+      {openSeries && data.elements?.length > 1 && (
+        <div style={{ padding: '.625rem .75rem', marginBottom: '.75rem',
+          border: '1px solid rgba(4,32,69,.12)', borderRadius: 'var(--tblr-border-radius)' }}>
+          <label className="form-label sm" htmlFor="mc-element">Case series</label>
+          <select id="mc-element" className="sm"
+            value={draft.element || data.element?.id || ''}
+            onChange={(e) => set({ element: e.target.value })}>
+            {data.elements.map((e) => <option key={e.id} value={e.id}>{e.label}</option>)}
+          </select>
+          {dirty && (
+            <div className="text-secondary" style={{ fontSize: '.6875rem', marginTop: '.5rem' }}>
+              Press Load to draw the channel from this series.
+            </div>
+          )}
+        </div>
+      )}
+
+      {incomplete && (
+        <div className="text-secondary" style={{ fontSize: '.6875rem', marginBottom: '.5rem' }}>
+          Name a facility, then press Load.
+        </div>
+      )}
 
       {/* The guidance is five to ten years. A channel drawn from fewer still
           renders, because a thin channel is more use than none, but it says so
@@ -488,7 +533,7 @@ export default function MalariaChannel({ scope: initialScope = 'facility' }) {
       {/* Between choosing "another facility" and naming one there is nothing to
           draw. Leaving the previous chart up would label this hospital's weeks
           with someone else's question. */}
-      {scope === 'other' && !ou ? (
+      {applied.scope === 'other' && !applied.ou ? (
         <div className="empty">
           <div className="empty-title">Choose a facility</div>
           <div className="empty-subtitle">
@@ -496,7 +541,18 @@ export default function MalariaChannel({ scope: initialScope = 'facility' }) {
           </div>
         </div>
       ) : (
-        <Channel data={data} />
+        <>
+          <Channel data={data} />
+          {/* What the two hints under the selects used to say. Below the chart
+              they cost no height above it, and they name what was actually
+              drawn rather than what is currently selected - which after a Load
+              button are no longer the same thing. */}
+          <div className="stat-foot">
+            {data.orgUnit?.name}
+            {data.element?.label ? ` · ${data.element.label}` : ''}
+            {' · 033B · baseline excludes '}{data.year} itself
+          </div>
+        </>
       )}
     </>
   );
