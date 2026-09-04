@@ -123,3 +123,25 @@ export function weekLabel(year, week) {
   const ymd = (d) => d.toISOString().slice(0, 10);
   return `Week ${week} (${ymd(monday)} - ${ymd(sunday)})`;
 }
+
+/* ------------------------------------------------- dashboard scope and period
+ *
+ * One list, shared. Two copies of these drift, and a card labelled differently
+ * from the card beside it reads as a different question rather than the same
+ * one asked of a wider org unit.
+ */
+
+/** The three organisation units a dashboard card can be scoped to, named the
+ *  way this hospital's staff name them. */
+export const SCOPE_LEVELS = [
+  { scope: 'facility', label: 'Jinja RRH' },
+  { scope: 'region', label: 'Busoga Region' },
+  { scope: 'national', label: 'MoH - National' },
+];
+
+/** How a year reads in a period picker. Every figure on these cards is
+ *  cumulative from week 1, so the two shapes of period are not the same: the
+ *  current year runs to the current week and a past one to its last. */
+export function yearLabel(year, currentYear) {
+  return year === currentYear ? `${year} · year to date` : `${year} · full year`;
+}

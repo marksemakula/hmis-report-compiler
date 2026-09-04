@@ -222,7 +222,7 @@ function FacilityView({ loading, rows, types, meta, agents, user }) {
           instead of under it, which is most of the difference between a card
           the height of this row and a card twice it. */}
       <div className="row-cards own-height" style={{ marginBottom: 'var(--tblr-page-padding)',
-        gridTemplateColumns: 'minmax(0,1.7fr) minmax(0,1fr) minmax(0,1.5fr)' }}>
+        gridTemplateColumns: 'minmax(0,1.6fr) minmax(0,1.1fr) minmax(0,1.3fr)' }}>
         {/* TB screening takes the place the "Reports compiled" counter held.
             A count of what this app compiled is a number about the app; the
             share of attendances screened is a number about the hospital, and

@@ -1193,6 +1193,136 @@ def perinatal_deaths(scope: str = "facility", year: int = None, session=None) ->
     }
 
 
+# ------------------------------------------- inpatient deaths over admissions
+#
+# The hospital's own standard: deaths at or below 4% of total admissions. Both
+# figures are HMIS 108, the monthly inpatient return, and both are on the same
+# line of the same form, so the ratio is a real one - unlike a death count
+# divided by OPD attendances, which mixes a ward number with a door number.
+#
+#   CI02  No. of admissions   the denominator
+#   CI03  No. of deaths       the numerator
+#
+# Returned as a month-by-month series rather than one figure, because a year's
+# average sitting under the standard can hide two months well over it, and a
+# standard is a thing you breach in a month, not on average.
+
+INPATIENT_STANDARD_PCT = 4.0
+ADMISSIONS_CODE = "CI02"
+DEATHS_CODE = "CI03"
+
+
+def _inpatient_element(code: str) -> dict:
+    """The 108 element for a code, or an empty dict when it is not cached."""
+    idx = mapping().get("HMIS108_codeIndex") or {}
+    els = mapping().get("dataElements", {}).get("HMIS108") or {}
+    deid = idx.get(code) or ""
+    if not deid:
+        return {}
+    name = (els.get(deid) or {}).get("name") or ""
+    return {"id": deid, "code": code,
+            "label": _CODE_PREFIX.sub("", name).strip() or name}
+
+
+def inpatient_mortality(scope: str = "facility", year: int = None, session=None) -> dict:
+    """Deaths as a share of admissions, by month, against the 4% standard."""
+    scope = (scope or "facility").lower()
+    if scope not in SCOPES:
+        raise RuntimeError(
+            f"Unknown scope '{scope}'. Check the scope parameter; "
+            f"the dashboard scopes are: {', '.join(SCOPES)}.")
+
+    today = date.today()
+    iso_year = today.isocalendar()[0]
+    year = int(year or today.year)
+    if year > today.year or year < today.year - SCREENING_HISTORY:
+        raise RuntimeError(
+            f"Cannot read {year}. Check the year parameter; it must be {today.year} or "
+            f"one of the {SCREENING_HISTORY} years before it.")
+    # 108 is monthly, so the year to date runs to the current month. The month
+    # in progress is included and labelled, not hidden: a part-month is a real
+    # observation as long as the card says how many months reported.
+    through = today.month if year == today.year else 12
+
+    adm = _inpatient_element(ADMISSIONS_CODE)
+    dea = _inpatient_element(DEATHS_CODE)
+
+    h = hierarchy(session=session)
+    ou = h[scope]
+    base = {
+        "scope": scope,
+        "orgUnit": {"id": ou["id"], "name": ou["name"]},
+        "year": year,
+        "throughMonth": through,
+        "periodLabel": f"January to {MONTH_NAMES[through - 1]} {year}",
+        "years": [iso_year - i for i in range(SCREENING_YEARS)],
+        "currentYear": today.year,
+        "standard": INPATIENT_STANDARD_PCT,
+        "elements": {"admissions": adm or None, "deaths": dea or None},
+        "monthsElapsed": through,
+    }
+
+    if not adm or not dea:
+        # Neither a failure nor a zero. The card names the two lines it wanted
+        # and says the cached metadata does not carry them.
+        return {**base, "months": [], "admissions": None, "deaths": None,
+                "rate": None, "withinStandard": None, "monthsReported": 0,
+                "resolved": False}
+
+    periods_list = [f"{year}{m:02d}" for m in range(1, through + 1)]
+    res = query([adm["id"], dea["id"]], ou["id"], ";".join(periods_list), session=session)
+
+    by_month = {m: {"admissions": None, "deaths": None} for m in range(1, through + 1)}
+    for row in res["rows"]:
+        v = _num(row.get("value"))
+        m = re.fullmatch(r"(\d{4})(\d{2})", str(row.get("pe") or ""))
+        if v is None or not m:
+            continue
+        month = int(m.group(2))
+        if month not in by_month:
+            continue
+        key = "admissions" if row.get("dx") == adm["id"] else \
+              "deaths" if row.get("dx") == dea["id"] else None
+        if key:
+            by_month[month][key] = (by_month[month][key] or 0) + v
+
+    months = []
+    for m in range(1, through + 1):
+        a = by_month[m]["admissions"]
+        d = by_month[m]["deaths"]
+        # A month with no admissions has no rate. Zero admissions and zero
+        # deaths is not a zero percent death rate, it is no denominator, and a
+        # line drawn through it as 0 reads as the best month of the year.
+        rate = round(100 * d / a, 2) if (a and d is not None) else None
+        months.append({
+            "period": f"{year}{m:02d}",
+            "month": m,
+            "label": MONTH_NAMES[m - 1],
+            "short": MONTH_NAMES[m - 1][:3],
+            "admissions": None if a is None else int(a),
+            "deaths": None if d is None else int(d),
+            "rate": rate,
+            "overStandard": rate is not None and rate > INPATIENT_STANDARD_PCT,
+        })
+
+    total_a = sum(x["admissions"] for x in months if x["admissions"] is not None)
+    total_d = sum(x["deaths"] for x in months if x["deaths"] is not None)
+    reported = [x for x in months if x["admissions"] is not None or x["deaths"] is not None]
+    rate = round(100 * total_d / total_a, 2) if total_a else None
+
+    return {
+        **base,
+        "months": months,
+        "admissions": total_a if reported else None,
+        "deaths": total_d if reported else None,
+        "rate": rate,
+        "withinStandard": None if rate is None else rate <= INPATIENT_STANDARD_PCT,
+        "monthsReported": len(reported),
+        "monthsOverStandard": sum(1 for x in months if x["overStandard"]),
+        "resolved": True,
+    }
+
+
 # ------------------------------------------------------- the malaria channel
 #
 # A "malaria channel" is the endemic-channel method Uganda uses to decide

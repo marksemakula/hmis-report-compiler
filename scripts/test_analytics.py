@@ -1037,8 +1037,100 @@ try:
 except RuntimeError as exc:
     check("an unknown scope is refused", "Check the scope parameter" in str(exc), True)
 
+print("\nInpatient deaths are measured against admissions, both from 108")
+# CI03 over CI02 is a ratio the form supports: both are the monthly inpatient
+# return, counted on the same line of the same register. Deaths over OPD
+# attendances, which this card used to show, divides a ward number by a door
+# number and cannot be checked against any standard.
+metadata._MAPPING["dataElements"] = {"HMIS108": {
+    "de108ci02x": {"name": "108-CI02. No. of admissions", "code": "CI02"},
+    "de108ci03x": {"name": "108-CI03. No. of deaths", "code": "CI03"},
+    "de108ci01x": {"name": "108-CI01. No. of beds", "code": "CI01"},
+}}
+metadata._MAPPING["HMIS108_codeIndex"] = {
+    "CI02": "de108ci02x", "CI03": "de108ci03x", "CI01": "de108ci01x"}
+
+
+class InpatientSession(StubSession):
+    """Three months: one under the standard, one over, one with no admissions."""
+
+    # month -> (admissions, deaths)
+    BY_MONTH = {1: (600, 18), 2: (500, 30), 3: (0, 0)}
+
+    def _analytics(self, params):
+        dims = {d.split(":", 1)[0]: d.split(":", 1)[1] for d in params.get("dimension", [])}
+        rows = []
+        for pe in dims.get("pe", "").split(";"):
+            m = _re.fullmatch(r"(\d{4})(\d{2})", pe)
+            if not m or int(m.group(2)) not in self.BY_MONTH:
+                continue
+            adm, dea = self.BY_MONTH[int(m.group(2))]
+            for dx in dims["dx"].split(";"):
+                if dx == "de108ci02x":
+                    rows.append([dx, pe, dims["ou"], str(adm)])
+                elif dx == "de108ci03x":
+                    rows.append([dx, pe, dims["ou"], str(dea)])
+        return {"headers": [{"name": "dx"}, {"name": "pe"}, {"name": "ou"}, {"name": "value"}],
+                "metaData": {"items": {}}, "rows": rows}
+
+
+analytics.reset_cache()
+ip = analytics.inpatient_mortality(scope="facility", year=2026, session=InpatientSession())
+check("the standard is 4% of admissions", ip["standard"], 4.0)
+check("the two elements are named back",
+      [ip["elements"]["admissions"]["code"], ip["elements"]["deaths"]["code"]],
+      ["CI02", "CI03"])
+months = {m["month"]: m for m in ip["months"]}
+check("a month's rate is its deaths over its admissions", months[1]["rate"], 3.0)
+check("...and a month over the standard is flagged", months[2]["rate"], 6.0)
+check("...as over", months[2]["overStandard"], True)
+check("...while one under it is not", months[1]["overStandard"], False)
+# Zero admissions is no denominator. Drawn as 0% it would read as the best
+# month of the year, which is the opposite of what an empty month means.
+check("a month with no admissions has no rate", months[3]["rate"], None)
+check("...and is not counted as over the standard", months[3]["overStandard"], False)
+check("the headline rate is the year's deaths over the year's admissions",
+      ip["rate"], round(100 * 48 / 1100, 2))
+# 4.36% over the year, from one month at 3% and one at 6%. The verdict is on
+# the year's own ratio, not on an average of the months: a small month at a
+# terrible rate must not weigh the same as a large one at a good rate.
+check("...and the verdict is on that ratio", ip["withinStandard"], False)
+check("months over the standard are counted separately",
+      ip["monthsOverStandard"], 1)
+check("the raw counts travel with the rate so it can be checked",
+      (ip["deaths"], ip["admissions"]), (48, 1100))
+
+class GoodYearSession(InpatientSession):
+    BY_MONTH = {1: (600, 18), 2: (500, 15)}
+
+
+analytics.reset_cache()
+good = analytics.inpatient_mortality(scope="facility", year=2026, session=GoodYearSession())
+check("a year inside the standard says so", good["withinStandard"], True)
+check("...with no month over it", good["monthsOverStandard"], 0)
+
+print("\nA rate with no elements behind it is withheld, not drawn as zero")
+metadata._MAPPING["dataElements"] = {"HMIS108": {}}
+metadata._MAPPING["HMIS108_codeIndex"] = {}
+analytics.reset_cache()
+bare = analytics.inpatient_mortality(scope="facility", year=2026, session=InpatientSession())
+check("it does not raise", isinstance(bare, dict), True)
+check("...and says the elements did not resolve", bare["resolved"], False)
+check("...and invents no rate", bare["rate"], None)
+check("...nor a verdict against the standard", bare["withinStandard"], None)
+check("...and still names the standard it would have used", bare["standard"], 4.0)
+
+try:
+    analytics.inpatient_mortality(scope="facility", year=_date.today().year + 1,
+                                  session=InpatientSession())
+    check("a year that has not happened is refused", True, False)
+except RuntimeError as exc:
+    check("a year that has not happened is refused",
+          "Check the year parameter" in str(exc), True)
+
 print("\nAn empty 033B listing is the one case that really is a metadata problem")
 metadata._MAPPING["HMIS033B_codeIndex"] = {}
+metadata._MAPPING["HMIS108_codeIndex"] = {}
 metadata._MAPPING["dataElements"] = {}
 analytics.reset_cache()
 try:

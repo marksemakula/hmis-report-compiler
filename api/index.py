@@ -552,6 +552,24 @@ def surveillance_deaths(scope: str = "facility", year: int = None,
         err(f"The death figures could not be read: {type(exc).__name__}", 502)
 
 
+@app.get("/api/py/mortality/inpatient")
+def inpatient_mortality(scope: str = "facility", year: int = None,
+                        user: dict = Depends(current_user)):
+    """Deaths as a share of admissions by month, against the 4% standard.
+
+    Both series are HMIS 108, the monthly inpatient return - CI03 over CI02 -
+    so the ratio is one the form itself supports. A month with no admissions
+    has no rate rather than a rate of zero."""
+    try:
+        return analytics.inpatient_mortality(scope=scope, year=year)
+    except RuntimeError:
+        raise
+    except requests.HTTPError as exc:
+        err(f"DHIS2 rejected the analytics request: {exc}", 502)
+    except Exception as exc:
+        err(f"The inpatient death rate could not be read: {type(exc).__name__}", 502)
+
+
 # ---------------- malaria channel ----------------
 
 @app.get("/api/py/malaria/elements")

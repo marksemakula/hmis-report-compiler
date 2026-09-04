@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { IconAlert } from './icons';
 import useWidth from './usewidth';
+import { SCOPE_LEVELS, yearLabel } from './lib';
 
 /* Attendance split by whether the patient was screened for TB, counted from
  * the start of the year.
@@ -42,12 +43,6 @@ import useWidth from './usewidth';
 const SCREENED = '#066fd1';
 const NOT_SCREENED = '#d63939';
 const AGE_RAMP = ['#c9e7e2', '#8fd0c8', '#4fb3a8', '#1d8a80', '#0b5c56'];
-
-const LEVELS = [
-  { scope: 'facility', label: 'Jinja RRH' },
-  { scope: 'region', label: 'Busoga Region' },
-  { scope: 'national', label: 'MoH - National' },
-];
 
 const nf = (n) => Number(n || 0).toLocaleString('en-GB');
 
@@ -302,7 +297,7 @@ export default function TbScreening() {
         <label className="form-label sm" htmlFor="tb-level">Level</label>
         <select id="tb-level" className="sm" style={{ width: 'auto', minWidth: '9.5rem' }}
           value={draft.scope} onChange={(e) => set({ scope: e.target.value })}>
-          {LEVELS.map((l) => <option key={l.scope} value={l.scope}>{l.label}</option>)}
+          {SCOPE_LEVELS.map((l) => <option key={l.scope} value={l.scope}>{l.label}</option>)}
         </select>
       </div>
       <div style={{ minWidth: 0 }}>
@@ -312,9 +307,7 @@ export default function TbScreening() {
             value={draft.year || String(data?.year || '')}
             onChange={(e) => set({ year: e.target.value })}>
             {years.map((y) => (
-              <option key={y} value={y}>
-                {y === currentYear ? `${y} · year to date` : `${y} · full year`}
-              </option>
+              <option key={y} value={y}>{yearLabel(y, currentYear)}</option>
             ))}
           </select>
         ) : (
