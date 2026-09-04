@@ -449,13 +449,18 @@ export default function TbScreening() {
         </div>
       ) : impossible ? (
         <div>
+          {/* What is wrong is certain; why is not. Three things produce a
+              numerator larger than its denominator and this card cannot tell
+              them apart from here, so it states the fact, names the two lines
+              it used, and leaves the diagnosis to the person who knows the
+              form. Guessing a cause in confident prose sends them to fix
+              whichever one the guess named. */}
           <div className="alert error">
             <strong>{nf(screened)} screened out of {nf(attendance)} attendances</strong> is
-            {' '}{rate === null ? 'more than everyone' : `${Math.round(rate)}%`}, so this is
-            not a share and it is not drawn. The numerator is right and the denominator is
-            short: total OPD attendance is more than one line of the form, and only
-            {' '}{(data.elements.attendance || []).length === 1 ? 'one is' : 'some are'}
-            {' '}counted here.
+            {' '}{rate === null ? 'more than everyone' : `${Math.round(rate)}%`}, which is not
+            a share, so it is not drawn. Either the denominator is the wrong line of 033B, or
+            it is one line of a total that takes several, or one of the two went unfiled for
+            part of the year. These are the lines it used.
           </div>
           <div className="datagrid" style={{ gap: '.75rem 1.5rem', marginTop: '.75rem' }}>
             <div>
@@ -472,8 +477,13 @@ export default function TbScreening() {
             </div>
           </div>
           <div className="stat-foot">
-            Open Series above and tick every line total OPD attendance is made of, then
-            press Load. {data.periodLabel} · {data.orgUnit.name}
+            Open Series above to change either line, then press Load.
+            {' '}{data.periodLabel} · {data.orgUnit.name}
+            {data.weeksReported < data.weeksElapsed && (
+              <> · <span className="fw-medium" style={{ color: 'var(--tblr-danger)' }}>
+                {data.weeksReported} of {data.weeksElapsed} weeks reported
+              </span></>
+            )}
           </div>
         </div>
       ) : (
@@ -596,7 +606,20 @@ export default function TbScreening() {
               </div>
             )}
 
+            {/* Which two lines of the form this share is made of, in the open.
+                A denominator that is the wrong line still draws a plausible
+                donut, and the only tell is a percentage that looks off - which
+                only helps when it looks off enough to notice. Naming the lines
+                lets the figure be checked by reading it. */}
             <div className="stat-foot" style={{ gridColumn: '1 / -1' }}>
+              {data.elements.screened?.label || 'screening line'}
+              {' ÷ '}
+              {(data.elements.attendance || []).map((e) => e.label).join(' + ')
+                || 'attendance line'}
+              {' · 033B'}
+            </div>
+
+            <div className="stat-foot" style={{ gridColumn: '1 / -1', marginTop: 0 }}>
               {data.periodLabel} · {data.orgUnit.name}
               {data.weeksReported < data.weeksElapsed && (
                 <> · <span className="fw-medium" style={{ color: 'var(--tblr-danger)' }}>

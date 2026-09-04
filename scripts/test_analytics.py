@@ -649,6 +649,14 @@ metadata._MAPPING["dataElements"] = {"HMIS033B": {
     "de033batt02": {"name": "033B-AP02. OPD Re-attendance"},
     "de033batt01": {"name": "033B-AP01. Total OPD Attendance"},
 }}
+# The two lines this hospital's form actually uses, checked by name against
+# lines built to beat them: "Total OPD attendance under 5 years" also says
+# "total" and also says "attendance", and it is not the denominator.
+metadata._MAPPING["dataElements"]["HMIS033B"].update({
+    "de033bap02x": {"name": "033B-AP02. Total OPD Attendance"},
+    "de033bap0u5": {"name": "033B-AP04. Total OPD Attendance under 5 years"},
+    "de033bap0op": {"name": "033B-AP05. Total outpatient department contacts"},
+})
 analytics.reset_cache()
 ranked = analytics.tb_screening_candidates()
 check("the entry-point screening line is offered first",
@@ -666,10 +674,17 @@ check("a TB line that is not a screening count is not offered as one",
       any(c["id"] == "de033btb005" for c in ranked["screened"]), False)
 check("...but it is still there to be chosen by hand",
       any(c["id"] == "de033btb005" for c in ranked["all"]), True)
-check("the total attendance line is offered first",
-      ranked["attendance"][0]["label"], "Total OPD Attendance")
-check("...with re-attendance offered, but not first",
-      [c["id"] for c in ranked["attendance"]], ["de033batt01", "de033batt02"])
+check("the AP02 total OPD attendance line is offered first",
+      ranked["attendance"][0]["id"], "de033bap02x")
+check("...ahead of a line that also says total and also says attendance",
+      [c["id"] for c in ranked["attendance"]].index("de033bap0u5") > 0, True)
+check("...and ahead of re-attendance",
+      [c["id"] for c in ranked["attendance"]].index("de033batt02") > 0, True)
+# AP01 here is named "Total OPD Attendance" as well, and would tie on the name
+# alone. The AP02 code is what separates them, which is why the code has to
+# survive into the ranking rather than being stripped off for display first.
+check("...and ahead of the same name under another code",
+      [c["id"] for c in ranked["attendance"]].index("de033batt01") > 0, True)
 # The whole list stays alphabetical: it is a lookup table, not a ranking, and
 # a reader hunting for a line by name needs it where the alphabet says.
 check("the full list is still alphabetical, so a line can be found by name",

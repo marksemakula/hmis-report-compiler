@@ -743,26 +743,49 @@ _SCREEN_RE = re.compile(r"screen", re.I)
 #
 # Ranked, not required: an instance that words its form differently still
 # resolves to something reasonable, and the picker still overrides either.
-_SCREEN_PREFERRED = re.compile(r"all\s+entry\s+points|\bTB0?1\b", re.I)
+#
+# Each tuple is ordered strongest signal first. The name of the line beats its
+# code and the code beats a generic word, so an instance that renumbered its
+# form still lands on the right line by its name, and one that reworded the
+# name still lands on it by its code.
+_SCREEN_PREFERRED = (
+    re.compile(r"\bTB0?1\b.*screened\s+for\s+TB\s+at\s+all\s+entry\s+points", re.I),
+    re.compile(r"screened\s+for\s+TB\s+at\s+all\s+entry\s+points", re.I),
+    re.compile(r"all\s+entry\s+points", re.I),
+    re.compile(r"\bTB0?1\b", re.I),
+    re.compile(r"screen", re.I),
+)
 _SCREEN_NARROWER = re.compile(
     r"presumptive|presumed|diagnos|confirm|positive|referred|treatment|"
     r"eligible|notified|contact|\bMDR\b|child|under\s*\d", re.I)
-_ATTENDANCE_PREFERRED = re.compile(r"\btotal\b", re.I)
+_ATTENDANCE_PREFERRED = (
+    # The code and the name agreeing is the strongest evidence there is, and
+    # the only thing that separates two lines a form has named identically.
+    re.compile(r"\bAP0?2\b.*total\s+OPD\s+attendance", re.I),
+    re.compile(r"total\s+OPD\s+attendance", re.I),
+    re.compile(r"\bAP0?2\b", re.I),
+    re.compile(r"\btotal\b.*attend|attend.*\btotal\b", re.I),
+    re.compile(r"\btotal\b", re.I),
+)
 _ATTENDANCE_NARROWER = re.compile(
     r"re-?attend|new\s+attend|referral|\bmale\b|\bfemale\b|under\s*\d", re.I)
 
 
-def _rank(entry: dict, preferred, narrower) -> tuple:
+def _rank(name: str, preferred, narrower) -> tuple:
     """Sort key putting the best guess first, then settling ties by name.
+
+    `preferred` is a tuple of patterns, strongest first, and a line scores by
+    the first one it matches. A single pattern cannot express that "Total OPD
+    Attendance" beats "Total attendance under 5", which both contain "total";
+    an ordered tuple can, and getting that order wrong is the whole of a
+    screening rate over 100%.
 
     Name length breaks the remaining ties on purpose: between two lines that
     look equally right, the shorter name is the more general one, and the more
     general one is the one this card wants.
     """
-    name = entry["label"]
-    return (0 if preferred.search(name) else 1,
-            1 if narrower.search(name) else 0,
-            len(name), name.lower())
+    tier = next((i for i, p in enumerate(preferred) if p.search(name)), len(preferred))
+    return (tier, 1 if narrower.search(name) else 0, len(name), name.lower())
 
 
 def _surveillance_elements() -> dict:
@@ -774,16 +797,23 @@ def tb_screening_candidates() -> dict:
     """The 033B elements that could be the attendance and TB-screening series,
     plus the full list so a missed guess can still be resolved by hand."""
     attendance, screened, every = [], [], []
+    # Ranking reads the name as the form writes it, code and all. The label
+    # drops the code so it reads well in a picker, and dropping it there would
+    # also drop the AP02 and TB01 that identify the line when an instance has
+    # reworded the rest of it.
+    raw = {}
     for deid, info in _surveillance_elements().items():
         name = (info or {}).get("name") or ""
+        raw[deid] = name
         entry = {"id": deid, "label": _CODE_PREFIX.sub("", name).strip() or name}
         every.append(entry)
         if _SCREEN_RE.search(name) and _TB_RE.search(name):
             screened.append(entry)
         elif _ATTENDANCE_RE.search(name):
             attendance.append(entry)
-    attendance.sort(key=lambda e: _rank(e, _ATTENDANCE_PREFERRED, _ATTENDANCE_NARROWER))
-    screened.sort(key=lambda e: _rank(e, _SCREEN_PREFERRED, _SCREEN_NARROWER))
+    attendance.sort(key=lambda e: _rank(raw[e["id"]], _ATTENDANCE_PREFERRED,
+                                        _ATTENDANCE_NARROWER))
+    screened.sort(key=lambda e: _rank(raw[e["id"]], _SCREEN_PREFERRED, _SCREEN_NARROWER))
     every.sort(key=lambda e: e["label"].lower())
     return {"attendance": attendance, "screened": screened,
             "all": every, "cached": len(every)}
