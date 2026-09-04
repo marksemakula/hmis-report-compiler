@@ -939,7 +939,106 @@ check("choosing both resolves it", fixed["needsChoice"], False)
 check("the chosen attendance element is used",
       [e["id"] for e in fixed["elements"]["attendance"]], ["de033bxxx01"])
 
+print("\nThe four 033B death lines resolve by code first, then by name")
+# A code survives a reworded name, and these four are reworded often: "Fresh
+# Still Birth" and "Fresh stillbirths" are the same line of the same form. So
+# CD22 here is named nothing like the register names it, and must still
+# resolve; CD23 carries no code at all, and must resolve by its name.
+metadata._MAPPING["dataElements"] = {"HMIS033B": {
+    "de033bcd20": {"name": "033B-CD20. Maternal death", "code": "CD20"},
+    "de033bcd21": {"name": "033B-CD21. Macerated Still births", "code": "CD21"},
+    "de033bcd22": {"name": "033B-CD22. Stillbirth, fresh", "code": "CD22"},
+    "de033bcd23": {"name": "033B-CD23. Early Neonatal deaths 0-7 days"},
+    "de033bmal01": {"name": "033B-CD01a. Malaria (Confirmed) - Cases", "code": "CD01a"},
+}}
+metadata._MAPPING["HMIS033B_codeIndex"] = {
+    "CD20": "de033bcd20", "CD21": "de033bcd21", "CD22": "de033bcd22",
+    "CD01a": "de033bmal01",
+}
+analytics.reset_cache()
+resolved = analytics.death_lines()
+check("all four lines are offered, in the order the form prints them",
+      [l["code"] for l in resolved], ["CD20", "CD21", "CD22", "CD23"])
+check("...carrying the abbreviation the paper register uses",
+      [l["short"] for l in resolved], ["MD", "MB", "FB", "EN"])
+check("a line resolves by its code even when renamed",
+      next(l["id"] for l in resolved if l["code"] == "CD22"), "de033bcd22")
+check("...and by its name when it carries no code",
+      next(l["id"] for l in resolved if l["code"] == "CD23"), "de033bcd23")
+check("an unrelated 033B line is not mistaken for one of them",
+      any(l["id"] == "de033bmal01" for l in resolved), False)
+
+
+class DeathSession(StubSession):
+    """Three deaths a week on two lines, none on a third, over 20 weeks."""
+
+    PER_WEEK = {"de033bcd20": 1, "de033bcd21": 2, "de033bcd22": 0, "de033bcd23": 3}
+    REPORTED_THROUGH = 20
+
+    def _analytics(self, params):
+        dims = {d.split(":", 1)[0]: d.split(":", 1)[1] for d in params.get("dimension", [])}
+        rows = []
+        for pe in dims.get("pe", "").split(";"):
+            m = _re.fullmatch(r"(\d{4})W(\d{1,2})", pe)
+            if not m or int(m.group(2)) > self.REPORTED_THROUGH:
+                continue
+            for dx in dims["dx"].split(";"):
+                if dx in self.PER_WEEK:
+                    rows.append([dx, pe, dims["ou"], str(self.PER_WEEK[dx])])
+        return {"headers": [{"name": "dx"}, {"name": "pe"}, {"name": "ou"}, {"name": "value"}],
+                "metaData": {"items": {}}, "rows": rows}
+
+
+analytics.reset_cache()
+deaths = analytics.perinatal_deaths(scope="facility", year=2026, session=DeathSession())
+by_code = {l["code"]: l for l in deaths["lines"]}
+check("each line is the sum of its weeks", by_code["CD20"]["value"], 20 * 1)
+check("...for every line", by_code["CD23"]["value"], 20 * 3)
+# Zero is a claim: nobody died on this line in the weeks that were filed.
+check("a line with no deaths reads zero, not blank", by_code["CD22"]["value"], 0)
+check("the total counts only the lines that resolved",
+      deaths["total"], 20 * (1 + 2 + 0 + 3))
+_W26 = _date.today().isocalendar()[1] if _date.today().isocalendar()[0] == 2026 \
+    else analytics.iso_weeks_in_year(2026)
+check("the period is a run of weeks, like the rest of the row",
+      deaths["periodLabel"], f"Weeks 1 to {_W26}, 2026")
+check("only the weeks that reported are counted", deaths["weeksReported"], 20)
+check("...against the weeks elapsed, which is not the same number",
+      (deaths["weeksElapsed"], deaths["weeksElapsed"] > deaths["weeksReported"]),
+      (_W26, True))
+
+print("\nA death line the form does not carry is blank, never zero")
+# Nobody died and nobody knows are opposite claims. A tile printing 0 for both
+# would report a clean week on a line the instance cannot even see.
+metadata._MAPPING["dataElements"] = {"HMIS033B": {
+    "de033bcd20": {"name": "033B-CD20. Maternal death", "code": "CD20"},
+}}
+metadata._MAPPING["HMIS033B_codeIndex"] = {"CD20": "de033bcd20"}
+analytics.reset_cache()
+partial = analytics.perinatal_deaths(scope="facility", year=2026, session=DeathSession())
+part_by = {l["code"]: l for l in partial["lines"]}
+check("the line that resolved carries a figure", part_by["CD20"]["value"], 20)
+check("the ones that did not are None, not 0", part_by["CD21"]["value"], None)
+check("...and are still listed so the gap is visible",
+      [l["code"] for l in partial["lines"]], ["CD20", "CD21", "CD22", "CD23"])
+check("how many resolved is reported", partial["resolved"], 1)
+
+metadata._MAPPING["dataElements"] = {"HMIS033B": {}}
+metadata._MAPPING["HMIS033B_codeIndex"] = {}
+analytics.reset_cache()
+none = analytics.perinatal_deaths(scope="facility", year=2026, session=DeathSession())
+check("no line at all does not raise", isinstance(none, dict), True)
+check("...and no total is invented", none["total"], None)
+check("...and nothing is claimed to have reported", none["reported"], False)
+
+try:
+    analytics.perinatal_deaths(scope="planet", session=DeathSession())
+    check("an unknown scope is refused", True, False)
+except RuntimeError as exc:
+    check("an unknown scope is refused", "Check the scope parameter" in str(exc), True)
+
 print("\nAn empty 033B listing is the one case that really is a metadata problem")
+metadata._MAPPING["HMIS033B_codeIndex"] = {}
 metadata._MAPPING["dataElements"] = {}
 analytics.reset_cache()
 try:

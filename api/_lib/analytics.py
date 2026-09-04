@@ -1078,6 +1078,121 @@ def tb_screening(scope: str = "facility", year: int = None, attendance: str = ""
     }
 
 
+# --------------------------------------- perinatal and maternal death lines
+#
+# The four death lines of 033B, cumulative from week 1 like everything else on
+# this card's row.
+#
+# Resolved by the element's code first and its name second. A code survives a
+# reworded name, and these four are reworded often: "Fresh Still Birth" and
+# "Fresh stillbirths" are the same line of the same form. An instance whose
+# elements carry no code at all still resolves by name.
+#
+# A line that resolves to nothing is reported as unresolved, never as zero.
+# For a death count those are opposite claims - nobody died, against nobody
+# knows - and a tile that prints 0 for both is worse than one that prints
+# neither.
+
+DEATH_LINES = (
+    {"code": "CD20", "short": "MD", "label": "Maternal death",
+     "match": re.compile(r"maternal\s+death", re.I)},
+    {"code": "CD21", "short": "MB", "label": "Macerated still birth",
+     "match": re.compile(r"macerated", re.I)},
+    {"code": "CD22", "short": "FB", "label": "Fresh still birth",
+     "match": re.compile(r"fresh\s+still\s*-?\s*birth", re.I)},
+    {"code": "CD23", "short": "EN", "label": "Early neonatal death, 0 to 7 days",
+     "match": re.compile(r"early\s+neonatal", re.I)},
+)
+
+
+def death_lines() -> list:
+    """Which 033B element each of the four death lines resolved to, if any."""
+    idx = mapping().get("HMIS033B_codeIndex") or {}
+    els = _surveillance_elements()
+    out = []
+    for line in DEATH_LINES:
+        deid = idx.get(line["code"]) or ""
+        if not deid:
+            deid = next((k for k, v in els.items()
+                         if line["match"].search((v or {}).get("name") or "")), "")
+        name = ((els.get(deid) or {}).get("name") or "") if deid else ""
+        out.append({
+            "code": line["code"],
+            "short": line["short"],
+            "label": line["label"],
+            "id": deid,
+            "element": (_CODE_PREFIX.sub("", name).strip() or name) if name else None,
+        })
+    return out
+
+
+def perinatal_deaths(scope: str = "facility", year: int = None, session=None) -> dict:
+    """The four 033B death lines, summed over weeks 1 to the current week."""
+    scope = (scope or "facility").lower()
+    if scope not in SCOPES:
+        raise RuntimeError(
+            f"Unknown scope '{scope}'. Check the scope parameter; "
+            f"the dashboard scopes are: {', '.join(SCOPES)}.")
+
+    today = date.today()
+    iso_year, iso_week, _ = today.isocalendar()
+    year = int(year or iso_year)
+    if year > iso_year or year < iso_year - SCREENING_HISTORY:
+        raise RuntimeError(
+            f"Cannot read {year}. Check the year parameter; it must be {iso_year} or "
+            f"one of the {SCREENING_HISTORY} years before it.")
+    through = iso_week if year == iso_year else iso_weeks_in_year(year)
+
+    lines = death_lines()
+    h = hierarchy(session=session)
+    ou = h[scope]
+    base = {
+        "scope": scope,
+        "orgUnit": {"id": ou["id"], "name": ou["name"]},
+        "year": year,
+        "throughWeek": through,
+        "periodLabel": f"Weeks 1 to {through}, {year}",
+        "years": [iso_year - i for i in range(SCREENING_YEARS)],
+        "currentYear": iso_year,
+        "weeksElapsed": through,
+    }
+
+    ids = [l["id"] for l in lines if l["id"]]
+    if not ids:
+        # Not a failure: the form is read from cached metadata, and an instance
+        # that has never cached 033B has nothing to resolve against. The tile
+        # says which lines it wanted rather than drawing four zeroes.
+        return {**base, "lines": [{**l, "value": None} for l in lines],
+                "total": None, "reported": False, "weeksReported": 0,
+                "resolved": 0}
+
+    weeks = [f"{year}W{w}" for w in range(1, through + 1)]
+    res = query(sorted(set(ids)), ou["id"], ";".join(weeks), session=session)
+
+    totals = {i: 0.0 for i in ids}
+    reported_weeks = set()
+    for row in res["rows"]:
+        v = _num(row.get("value"))
+        if v is None or row.get("dx") not in totals:
+            continue
+        totals[row["dx"]] += v
+        m = re.fullmatch(r"(\d{4})W(\d{1,2})", str(row.get("pe") or "").upper())
+        if m:
+            reported_weeks.add(int(m.group(2)))
+
+    out = [{**l, "value": int(totals[l["id"]]) if l["id"] else None} for l in lines]
+    return {
+        **base,
+        "lines": out,
+        # The total counts only the lines that resolved, so it never reads as
+        # the whole of a form some of whose lines were never found.
+        "total": int(sum(totals.values())),
+        "resolved": len(ids),
+        "reported": bool(reported_weeks),
+        "weeksReported": len(reported_weeks),
+    }
+
+
 # ------------------------------------------------------- the malaria channel
 #
 # A "malaria channel" is the endemic-channel method Uganda uses to decide

@@ -532,6 +532,26 @@ def tb_screening(scope: str = "facility", year: int = None, attendance: str = ""
         err(f"The screening figures could not be read: {type(exc).__name__}", 502)
 
 
+@app.get("/api/py/surveillance/deaths")
+def surveillance_deaths(scope: str = "facility", year: int = None,
+                        user: dict = Depends(current_user)):
+    """The four HMIS 033B death lines - maternal, macerated and fresh
+    stillbirth, and early neonatal - summed over ISO weeks 1 to the current
+    week.
+
+    A line the cached metadata cannot resolve comes back with a null value
+    rather than a zero: for a death count, nobody died and nobody knows are
+    opposite claims."""
+    try:
+        return analytics.perinatal_deaths(scope=scope, year=year)
+    except RuntimeError:
+        raise
+    except requests.HTTPError as exc:
+        err(f"DHIS2 rejected the analytics request: {exc}", 502)
+    except Exception as exc:
+        err(f"The death figures could not be read: {type(exc).__name__}", 502)
+
+
 # ---------------- malaria channel ----------------
 
 @app.get("/api/py/malaria/elements")

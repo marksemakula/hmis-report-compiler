@@ -9,6 +9,7 @@ import {
 import DistrictMap from './districtmap';
 import MalariaChannel from './malariachannel';
 import Mortality from './mortality';
+import PerinatalDeaths from './perinataldeaths';
 import TbScreening from './tbscreening';
 import useWidth from './usewidth';
 
@@ -193,12 +194,7 @@ const STATE = {
 
 function FacilityView({ loading, rows, types, meta, agents, user }) {
   const submitted = rows.filter((r) => r.push_status === 'PUSHED');
-  const drafts = rows.filter((r) => r.push_status === 'DRAFT');
-  const failed = rows.filter((r) => r.push_status === 'FAILED');
   const valuesSent = submitted.reduce((a, r) => a + (r.value_count || 0), 0);
-  // Reports are returned newest first, so the last draft in the list is the
-  // one that has been waiting longest.
-  const oldestDraft = drafts.length ? drafts[drafts.length - 1] : null;
 
   const latestByType = new Map();
   for (const r of rows) if (!latestByType.has(r.type)) latestByType.set(r.type, r);
@@ -241,15 +237,12 @@ function FacilityView({ loading, rows, types, meta, agents, user }) {
             <TbScreening />
           </div>
         </div>
-        <div className="card-stack">
-          <StatTile Icon={IconInbox} tone="warning" label="Awaiting submission"
-            value={loading ? '—' : nf(drafts.length)}
-            foot={loading ? ' ' : oldestDraft ? `Oldest: ${formatPeriod(oldestDraft.period)}` : 'Nothing waiting'} />
-          <StatTile Icon={IconAlert} tone="danger" label="Failed submissions"
-            valueTone={failed.length ? 'danger' : undefined}
-            value={loading ? '' : nf(failed.length)}
-            foot={loading ? ' ' : failed.length ? `Most recent: ${formatPeriod(failed[0].period)}` : 'None recorded'} />
-        </div>
+        {/* The two submission counters that stood here counted this app's own
+            work. The deaths do not: they are four lines of the hospital's
+            weekly return, and they belong next to the screening share for the
+            same reason it replaced a compiled-report count. Both submission
+            states still read on the Reports page, where the submissions are. */}
+        <PerinatalDeaths scope="facility" />
         <Mortality />
       </div>
 
