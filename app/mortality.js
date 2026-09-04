@@ -1,6 +1,6 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { isoWeek, weekLabel } from './lib';
+import { isoWeek, weekLabel, weeksInYear, SCOPE_LEVELS, yearLabel } from './lib';
 import { IconAlert } from './icons';
 import useWidth from './usewidth';
 
@@ -210,30 +210,51 @@ function RateTrend({ months, standard }) {
   );
 }
 
+/* Which week the causes are counted up to.
+ *
+ * The current year ends at the week just finished, because this week is still
+ * being filled in and a count taken halfway through one reads as a collapse in
+ * deaths. A past year ends at its own last week, not at whatever week today
+ * happens to be. */
+function endWeekOf(year, currentYear) {
+  const y = Number(year);
+  if (!y || y === currentYear) {
+    const [wy, ww] = isoWeek(new Date(Date.now() - 7 * 86400000));
+    return `${wy}W${ww}`;
+  }
+  return `${y}W${weeksInYear(y)}`;
+}
+
 export default function Mortality({ scope = 'facility' }) {
+  /* Level, Period and the cause window are one set of filters behind one Load
+     button, the same as the two cards to the left. Three controls that each
+     fired their own request would put this card in three different states
+     while a reader was still deciding what to ask. */
+  const START = { scope, year: '', window: 'ytd' };
+  const [draft, setDraft] = useState(START);
+  const [applied, setApplied] = useState(START);
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
-  /* Year to date by default. A rolling quarter is too thin at this hospital:
-     101 causes were certified in the whole of 2026 to date, so thirteen weeks
-     of them is a top five of threes and twos. */
-  const [windowKey, setWindowKey] = useState('ytd');
   // The rate and the causes come from two different returns - 108 monthly and
   // the certificates - so they are two requests. Folding them into one would
   // make the causes wait on a series they have nothing to do with.
   const [ip, setIp] = useState(null);
   const [ipError, setIpError] = useState('');
 
-  /* The week just finished: this week is still being filled in, and a rate
-     computed halfway through one reads as a collapse in deaths. */
-  const [year, week] = isoWeek(new Date(Date.now() - 7 * 86400000));
-  const period = `${year}W${week}`;
+  const years = ip?.years || [];
+  const currentYear = ip?.currentYear ?? years[0];
+  const period = endWeekOf(applied.year, currentYear);
+  const causeQuery = `period=${period}&window=${applied.window}&scope=${applied.scope}`;
+  const rateQuery = `scope=${applied.scope}${applied.year ? `&year=${applied.year}` : ''}`;
+  const dirty = JSON.stringify(draft) !== JSON.stringify(applied);
+  const busy = loading || ip === null;
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (qs) => {
     setLoading(true);
     setError('');
     try {
-      const r = await fetch(`/api/py/mortality?period=${period}&window=${windowKey}&scope=${scope}`);
+      const r = await fetch(`/api/py/mortality?${qs}`);
       const b = await r.json().catch(() => null);
       if (!r.ok) throw new Error(b?.detail || `Mortality could not be read (HTTP ${r.status}).`);
       setData(b);
@@ -243,12 +264,12 @@ export default function Mortality({ scope = 'facility' }) {
     } finally {
       setLoading(false);
     }
-  }, [period, windowKey, scope]);
+  }, []);
 
-  const loadRate = useCallback(async () => {
+  const loadRate = useCallback(async (qs) => {
     setIpError('');
     try {
-      const r = await fetch(`/api/py/mortality/inpatient?scope=${scope}`);
+      const r = await fetch(`/api/py/mortality/inpatient?${qs}`);
       const b = await r.json().catch(() => null);
       if (!r.ok) throw new Error(b?.detail || `The death rate could not be read (HTTP ${r.status}).`);
       setIp(b);
@@ -256,40 +277,81 @@ export default function Mortality({ scope = 'facility' }) {
       setIp(null);
       setIpError(e.message);
     }
-  }, [scope]);
+  }, []);
 
-  useEffect(() => { load(); }, [load]);
-  useEffect(() => { loadRate(); }, [loadRate]);
+  useEffect(() => { load(causeQuery); }, [load, causeQuery]);
+  useEffect(() => { loadRate(rateQuery); }, [loadRate, rateQuery]);
+
+  const set = (patch) => setDraft((d) => ({ ...d, ...patch }));
+
+  const picker = (
+    <div style={{ display: 'flex', alignItems: 'flex-end', gap: '.5rem',
+      flexWrap: 'wrap', margin: '.375rem 0 .5rem' }}>
+      <div style={{ minWidth: 0 }}>
+        <label className="form-label sm" htmlFor="mort-level">Level</label>
+        <select id="mort-level" className="sm" style={{ width: 'auto', minWidth: '9rem' }}
+          value={draft.scope} onChange={(e) => set({ scope: e.target.value })}>
+          {SCOPE_LEVELS.map((l) => <option key={l.scope} value={l.scope}>{l.label}</option>)}
+        </select>
+      </div>
+      <div style={{ minWidth: 0 }}>
+        <label className="form-label sm" htmlFor="mort-period">Period</label>
+        {years.length ? (
+          <select id="mort-period" className="sm" style={{ width: 'auto', minWidth: '10rem' }}
+            value={draft.year || String(ip?.year || '')}
+            onChange={(e) => set({ year: e.target.value })}>
+            {years.map((y) => <option key={y} value={y}>{yearLabel(y, currentYear)}</option>)}
+          </select>
+        ) : (
+          <select id="mort-period" className="sm" disabled
+            style={{ width: 'auto', minWidth: '10rem' }}>
+            <option>Reading…</option>
+          </select>
+        )}
+      </div>
+      <button type="button" id="mort-load" className={`btn sm${dirty ? '' : ' secondary'}`}
+        disabled={busy || !dirty} onClick={() => setApplied(draft)}>
+        {busy ? 'Loading…' : 'Load'}
+      </button>
+    </div>
+  );
+
+  const shell = (body) => (
+    <div className="card">
+      <div className="card-body">
+        <div className="page-pretitle">Mortality</div>
+        {picker}
+        {body}
+      </div>
+    </div>
+  );
 
   if (loading && !data) {
-    return (
-      <div className="card">
-        <div className="card-body">
-          <div className="loading-bar" style={{ marginBottom: '.75rem' }} />
-          <div className="text-secondary" style={{ fontSize: '.75rem' }}>
-            Reading death certificates from DHIS2…
-          </div>
+    return shell(
+      <>
+        <div className="loading-bar" style={{ marginBottom: '.75rem' }} />
+        <div className="text-secondary" style={{ fontSize: '.75rem' }}>
+          Reading death certificates from DHIS2…
         </div>
-      </div>
+      </>
     );
   }
 
   if (error) {
-    return (
-      <div className="card">
-        <div className="card-body">
-          <div className="d-flex items-center gap-2" style={{ marginBottom: '.5rem' }}>
-            <IconAlert size={18} />
-            <span className="fw-medium">Mortality unavailable</span>
-          </div>
-          <div className="text-secondary" style={{ fontSize: '.75rem', marginBottom: '.5rem' }}>{error}</div>
-          <button type="button" className="btn secondary sm" onClick={load}>Try again</button>
+    return shell(
+      <>
+        <div className="d-flex items-center gap-2" style={{ marginBottom: '.5rem' }}>
+          <IconAlert size={18} />
+          <span className="fw-medium">Mortality unavailable</span>
         </div>
-      </div>
+        <div className="text-secondary" style={{ fontSize: '.75rem', marginBottom: '.5rem' }}>{error}</div>
+        <button type="button" className="btn secondary sm"
+          onClick={() => load(causeQuery)}>Try again</button>
+      </>
     );
   }
 
-  if (!data) return null;
+  if (!data) return shell(null);
 
   const max = Math.max(
     1,
@@ -297,23 +359,22 @@ export default function Mortality({ scope = 'facility' }) {
     ...(data.mpdsr || []).map((r) => r.deaths),
   );
 
-  return (
-    <div className="card">
-      <div className="card-body">
-        <div className="d-flex items-center gap-2" style={{ marginBottom: '.25rem' }}>
-          <span className="page-pretitle">Mortality</span>
-          <span className="text-secondary ms-auto" style={{ fontSize: '.6875rem' }}>
-            {weekLabel(Number(String(data.period).slice(0, 4)),
-              Number(String(data.period).slice(5)))}
-          </span>
-        </div>
-
+  return shell(
+      <>
         {/* The rate is the headline and the standard is stated beside it,
             because a rate with nothing to measure it against is a number
             nobody can act on. The two counts under it are what the rate is
             made of: a rate with no denominator cannot be checked. */}
         {ipError ? (
-          <div className="stat-foot" style={{ marginBottom: '.6rem' }}>{ipError}</div>
+          /* Loud, not a footnote. A trend that quietly fails to appear is
+             indistinguishable from one nobody built, and the commonest cause
+             is a server that has not been restarted onto this build - which is
+             worth saying out loud rather than leaving as a gap on the card. */
+          <div className="alert error" style={{ marginBottom: '.6rem' }}>
+            <div style={{ marginBottom: '.4rem' }}>{ipError}</div>
+            <button type="button" className="btn secondary sm"
+              onClick={() => loadRate(rateQuery)}>Try again</button>
+          </div>
         ) : !ip ? (
           <div className="loading-bar" style={{ margin: '.5rem 0 .75rem' }} />
         ) : (
@@ -352,6 +413,10 @@ export default function Mortality({ scope = 'facility' }) {
             </div>
             {ip.resolved !== false && (
               <div style={{ marginBottom: '.6rem' }}>
+                <div className="text-secondary"
+                  style={{ fontSize: '.6875rem', marginBottom: '.15rem' }}>
+                  CI03 deaths as a share of CI02 admissions, by month
+                </div>
                 <RateTrend months={ip.months} standard={ip.standard} />
               </div>
             )}
@@ -362,7 +427,8 @@ export default function Mortality({ scope = 'facility' }) {
           <div className="d-flex items-center gap-2" style={{ marginBottom: '.5rem' }}>
             <label htmlFor="mort-window" className="text-secondary"
               style={{ fontSize: '.6875rem', marginBottom: 0 }}>Causes counted</label>
-            <select id="mort-window" value={windowKey} onChange={(e) => setWindowKey(e.target.value)}
+            <select id="mort-window" value={draft.window}
+              onChange={(e) => set({ window: e.target.value })}
               style={{ fontSize: '.6875rem', padding: '.15rem .4rem', width: 'auto' }}>
               {(data.windows || []).map((w) => (
                 <option key={w.key} value={w.key}>{w.label}</option>
@@ -407,9 +473,10 @@ export default function Mortality({ scope = 'facility' }) {
           Causes from the medical certificates of cause of death (HMIS 100); the rate from
           {' '}HMIS 108, CI03 deaths over CI02 admissions. The MPDSR review forms carry no coded cause at this
           hospital, so those bars are drawn from the certificates themselves: deaths a
-          pregnancy contributed to, and stillbirths.
+          pregnancy contributed to, and stillbirths. Causes run to
+          {' '}{weekLabel(Number(String(data.period).slice(0, 4)),
+            Number(String(data.period).slice(5)))}.
         </div>
-      </div>
-    </div>
+      </>
   );
 }
