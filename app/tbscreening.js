@@ -185,12 +185,16 @@ function shortBand(band, label) {
 /** The query a fetch is made from: what has actually been asked for. */
 const asQuery = (q) => {
   const p = new URLSearchParams({ scope: q.scope });
+  // An empty year means "whatever the server calls this year". Sending nothing
+  // is not the same as sending a year the browser worked out: a machine with a
+  // wrong clock would ask for a year that has not happened.
+  if (q.year) p.set('year', q.year);
   if (q.attendance.length) p.set('attendance', q.attendance.join(','));
   if (q.screened) p.set('screened', q.screened);
   return p.toString();
 };
 
-const START = { scope: 'facility', attendance: [], screened: '' };
+const START = { scope: 'facility', year: '', attendance: [], screened: '' };
 
 export default function TbScreening() {
   /* Two copies of the filter state. `draft` is what the controls show and
@@ -212,6 +216,11 @@ export default function TbScreening() {
 
   const query = asQuery(applied);
   const dirty = query !== asQuery(draft);
+  // Newest first, and the current year named as such: every total on this card
+  // is cumulative from week 1, so a past year means the whole of it and this
+  // year means as far as it has got.
+  const years = data?.years || [];
+  const currentYear = data?.currentYear ?? years[0];
 
   const load = useCallback(async (qs) => {
     setLoading(true);
@@ -295,6 +304,27 @@ export default function TbScreening() {
           value={draft.scope} onChange={(e) => set({ scope: e.target.value })}>
           {LEVELS.map((l) => <option key={l.scope} value={l.scope}>{l.label}</option>)}
         </select>
+      </div>
+      <div style={{ minWidth: 0 }}>
+        <label className="form-label sm" htmlFor="tb-period">Period</label>
+        {years.length ? (
+          <select id="tb-period" className="sm" style={{ width: 'auto', minWidth: '10.5rem' }}
+            value={draft.year || String(data?.year || '')}
+            onChange={(e) => set({ year: e.target.value })}>
+            {years.map((y) => (
+              <option key={y} value={y}>
+                {y === currentYear ? `${y} · year to date` : `${y} · full year`}
+              </option>
+            ))}
+          </select>
+        ) : (
+          // Before the first answer the server has not said which years exist,
+          // and this must not guess from the browser's clock.
+          <select id="tb-period" className="sm" disabled
+            style={{ width: 'auto', minWidth: '10.5rem' }}>
+            <option>Reading…</option>
+          </select>
+        )}
       </div>
       <button type="button" id="tb-load" className={`btn sm${dirty ? '' : ' secondary'}`}
         disabled={loading || !dirty} onClick={() => setApplied(draft)}>

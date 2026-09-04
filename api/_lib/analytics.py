@@ -725,6 +725,13 @@ def map_values(indicator: str, period: str, session=None) -> dict:
 # authority. When a guess misses, the endpoint returns the whole 033B list and
 # asks the reader to pick rather than refusing to draw anything: a regex that
 # does not recognise a name is a reason to offer a choice, not a dead end.
+# How many years the period picker offers, and how far back a year may be
+# asked for at all. The picker is short because a list nobody scrolls is not a
+# picker; the window behind it is longer because an instance holding ten years
+# should not have eight of them unreachable by parameter.
+SCREENING_YEARS = 6
+SCREENING_HISTORY = 20
+
 _ATTENDANCE_RE = re.compile(r"attendance|attendances|out[\s-]?patient|\bopd\b", re.I)
 _TB_RE = re.compile(r"\btb\b|tubercul", re.I)
 _SCREEN_RE = re.compile(r"screen", re.I)
@@ -973,6 +980,13 @@ def tb_screening(scope: str = "facility", year: int = None, attendance: str = ""
     today = date.today()
     iso_year, iso_week, _ = today.isocalendar()
     year = int(year or iso_year)
+    # A year outside the window is refused rather than drawn as an empty chart.
+    # Fifty-two weeks of periods DHIS2 holds nothing for looks exactly like a
+    # hospital that filed nothing, and the two want opposite responses.
+    if year > iso_year or year < iso_year - SCREENING_HISTORY:
+        raise RuntimeError(
+            f"Cannot read {year}. Check the year parameter; it must be {iso_year} or "
+            f"one of the {SCREENING_HISTORY} years before it.")
     # Weeks 1 to the current week of the year being read; a past year runs to
     # its own last week rather than stopping where this year happens to be.
     through = iso_week if year == iso_year else iso_weeks_in_year(year)
@@ -982,6 +996,12 @@ def tb_screening(scope: str = "facility", year: int = None, attendance: str = ""
         "year": year,
         "throughWeek": through,
         "periodLabel": f"Weeks 1 to {through}, {year}",
+        # The years the period picker offers, newest first. Sent by the server
+        # because the server is the one that knows what "this year" is: a
+        # browser with a wrong clock would otherwise offer a year that does not
+        # exist yet and get an empty chart for it.
+        "years": [iso_year - i for i in range(SCREENING_YEARS)],
+        "currentYear": iso_year,
         # attendance is a list: the denominator may be several lines added up.
         "elements": {"attendance": att_els, "screened": scr_el},
         "candidates": options,

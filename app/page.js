@@ -233,7 +233,11 @@ function FacilityView({ loading, rows, types, meta, agents, user }) {
             the compiled total still reads on the Reports page. */}
         <div className="card flush">
           <div className="card-body">
-            <div className="page-pretitle">TB screening of attendances, year to date</div>
+            {/* The period is the card's own, and it is no longer always this
+                year, so the heading no longer claims it is. Which weeks of
+                which year the figures cover reads under the chart, from the
+                response rather than from a title written once. */}
+            <div className="page-pretitle">TB screening of attendances</div>
             <TbScreening />
           </div>
         </div>

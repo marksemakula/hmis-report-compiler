@@ -19,6 +19,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "api"))
 from _lib import analytics  # noqa: E402
 from _lib import metadata  # noqa: E402
 import re as _re  # noqa: E402
+from datetime import date as _date  # noqa: E402
 
 failures = []
 
@@ -720,6 +721,35 @@ print("\nA past year runs to its own last week, not to today's")
 analytics.reset_cache()
 old = analytics.tb_screening(scope="facility", year=2020, session=ScreeningSession())
 check("2020 had 53 ISO weeks", old["throughWeek"], 53)
+check("...and its label says the whole of it",
+      old["periodLabel"], "Weeks 1 to 53, 2020")
+
+print("\nThe period picker is offered in years, newest first")
+_THIS = _date.today().isocalendar()[0]
+analytics.reset_cache()
+now = analytics.tb_screening(scope="facility", session=ScreeningSession())
+check("this year is what is drawn when no year is asked for", now["year"], _THIS)
+check("...and it is named as the current one", now["currentYear"], _THIS)
+check("the picker offers a run of years", now["years"],
+      [_THIS - i for i in range(analytics.SCREENING_YEARS)])
+check("...newest first, so the default sits at the top", now["years"][0], _THIS)
+check("...and every one of them is a real past year",
+      all(y <= _THIS for y in now["years"]), True)
+# Every total on this card is cumulative from week 1, so a year IS a period.
+# The current one runs to the current week and a past one to its last.
+check("this year runs to the current week, not to 52",
+      now["throughWeek"], _date.today().isocalendar()[1])
+
+# A year DHIS2 cannot hold data for is refused. Fifty-two weeks of periods
+# with nothing behind them draws an empty chart that reads as a hospital which
+# filed nothing, and the two want opposite responses from a reader.
+for bad in (_THIS + 1, _THIS - analytics.SCREENING_HISTORY - 1):
+    try:
+        analytics.tb_screening(scope="facility", year=bad, session=ScreeningSession())
+        check(f"{bad} is refused", True, False)
+    except RuntimeError as exc:
+        check(f"{bad} is refused, and the message says the window",
+              str(_THIS) in str(exc) and "year parameter" in str(exc), True)
 
 print("\nMore screened than attended cannot be drawn as a slice bigger than the pie")
 
