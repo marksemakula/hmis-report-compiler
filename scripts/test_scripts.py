@@ -528,3 +528,30 @@ check("the compiler takes a marked code as given",
 check("...rather than hunting it among ICD-11 stems, where it is not",
       _comp.index("startswith(extract_scripts.DIRECT_PREFIX)")
       < _comp.index('map_diagnosis(raw, code_index, source="icd11")'), True)
+
+
+print("\nThe malaria chain: three lines, one set of cases")
+# EP01c came from translating diagnoses, so every malaria case was reported as
+# confirmed by blood slide or rapid test - August said 90 when that included
+# clients who had neither. The chain the Ministry reads is:
+#     EP01c confirmed by test · EP01d confirmed and treated · EP01e total treated
+# and EP01e minus EP01d is exactly the clinically diagnosed.
+for line in ("EP01c", "EP01d", "EP01e"):
+    check(f"{line} is emitted directly",
+          f"'{gen.DIRECT_PREFIX}{line}'" in strata, True)
+check("malaria leaves the ordinary diagnosis branch, or it counts twice",
+      "NOT IN (" + gen.MALARIA_DIAGNOSES + ")" in strata, True)
+check("what counts as malaria is read from the ICD-11 table, not written twice",
+      len(gen.malaria_diagnosis_codes()) > 0, True)
+check("...and every one of them maps to EP01c",
+      {__import__('_lib.diagnosis_map', fromlist=['x']).icd11_map()[c]
+       for c in gen.malaria_diagnosis_codes()}, {"EP01c"})
+# A case, not a mention: a visit with malaria typed twice is one case.
+check("counted per client", "DISTINCT s.VisitNo, s.band" in strata, True)
+# Tested, not test-positive. 173 rapid tests were drawn in week 35 and not one
+# result was typed in; requiring a recorded positive would report a hospital
+# that treats malaria it never confirms.
+check("confirmed means tested, since results are not reliably recorded",
+      "mal.tested = 1" in strata, True)
+check("and the total is every case, tested or not",
+      strata.count("FROM    mal\nGROUP BY"), 1)

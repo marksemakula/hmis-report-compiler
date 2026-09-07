@@ -32,9 +32,22 @@ Read from the national instance for Jinja RRH, 2020 to 2024:
 
 Four things in that table are worth encoding as checks.
 
-  * EP01b and EP01d have NEVER been reported. Not once in five years. Two of
-    the five links in the chain are permanently absent, so nobody can see how
-    many fevers were tested or how many confirmed cases were treated.
+  * EP01b and EP01d had NEVER been reported. Not once in five years. Two of
+    the five links in the chain were permanently absent, so nobody could see
+    how many fevers were tested or how many confirmed cases were treated.
+
+    Both are produced from September 2026. EP01b counts clients with a malaria
+    test drawn, which is laboratory work and no diagnosis can express; EP01d
+    counts confirmed cases, on the hospital's rule that a confirmed case is a
+    treated one. The rules below stop being a description of a broken chain and
+    become a check on a working one.
+
+  * EP01c reported every malaria case, tested or not, because it came from
+    translating diagnoses and a diagnosis does not know whether a slide was
+    taken. August 2026 said 90 confirmed by blood slide or rapid test when that
+    figure included clients who had neither. EP01c is now the tested ones and
+    EP01e the total, so EP01e minus EP01d is the clinically diagnosed - which
+    is the number the chain exists to show.
 
   * EP01c and EP01e are identical in 2023 and 2024, having differed by 9 to 71
     in the years before. Identical is not impossible, but it is what happens

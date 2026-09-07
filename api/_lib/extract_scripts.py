@@ -145,7 +145,21 @@ DIRECT_PREFIX = "(hmis)"
 # Malaria testing, as ClinicMaster's laboratory records it. SNOMED CT codes,
 # the same two the 033B weekly tally counts for MA02 and MA04.
 MALARIA_TEST_CODES = ("407727009", "372071003")   # RDT, microscopy
+
+
+def malaria_diagnosis_codes():
+    """Every ClinicMaster disease code that means malaria, read from the ICD-11
+    table rather than listed here.
+
+    Twenty of them today - the 1F4 family, the ICD-10 stems B50-9 and B54 the
+    dictionary still carries, congenital malaria and malaria in pregnancy - and
+    the number will change as the table is corrected. Reading it means the SQL
+    and the compiler cannot come to disagree about what malaria is, which they
+    would within a month of being written out twice."""
+    from .diagnosis_map import icd11_map
+    return sorted(k for k, v in icd11_map().items() if v == "EP01c")
 MALARIA_TESTS = ", ".join(f"'{c}'" for c in MALARIA_TEST_CODES)
+MALARIA_DIAGNOSES = ", ".join(f"'{c}'" for c in malaria_diagnosis_codes())
 
 DATABASE = "ClinicMasterMOH"
 DEFAULT_SERVER = "172.20.0.230"
@@ -348,6 +362,24 @@ def opd_strata_sql(start: date, end_exclusive: date) -> str:
     FROM    b
     JOIN    (VALUES {sexes}) AS sx(code, name) ON sx.code = b.sex_code
     WHERE   b.age_years IS NOT NULL
+), mal AS (
+    /* One row per malaria CASE - per client, not per time the condition was
+       typed - carrying whether that client was tested for it. */
+    SELECT  DISTINCT s.VisitNo, s.band, s.sex, s.visit,
+            CASE WHEN EXISTS (
+                     SELECT 1
+                     FROM   {DATABASE}.dbo.LabRequests q
+                     JOIN   {DATABASE}.dbo.LabRequestDetails t
+                         ON t.SpecimenNo = q.SpecimenNo
+                     WHERE  q.VisitNo = s.VisitNo
+                       AND  t.TestCode IN ({MALARIA_TESTS}))
+                 THEN 1 ELSE 0 END AS tested
+    FROM    s
+    JOIN    {DATABASE}.dbo.Diagnosis d
+         ON d.TreatmentNo = s.VisitNo
+        AND d.ObjectName  = 'Visits'
+        AND d.VisitType   = 'Out Patient'
+    WHERE   d.DiseaseCode IN ({MALARIA_DIAGNOSES})
 )
 SELECT  '{ATTENDANCE_SENTINEL}' AS diagnosis, s.band, s.sex, s.visit, COUNT(*) AS n
 FROM    s
@@ -362,7 +394,51 @@ JOIN    {DATABASE}.dbo.Diagnosis d
     AND d.ObjectName  = 'Visits'
     AND d.VisitType   = 'Out Patient'
 WHERE   d.DiseaseCode IS NOT NULL
+  AND   d.DiseaseCode NOT IN ({MALARIA_DIAGNOSES})
 GROUP BY d.DiseaseCode, s.band, s.sex, s.visit
+
+UNION ALL
+
+/* The malaria chain, which the Ministry reads as one sequence and which no
+   single translation of a diagnosis can produce.
+
+     EP01c  confirmed by test    a malaria case whose client was tested
+     EP01d  confirmed and treated
+     EP01e  total treated        every malaria case, tested or not
+
+   Translating diagnoses reported ALL of them as EP01c, so August said 90
+   confirmed by blood slide or rapid test when that figure included clients who
+   had neither. The difference between EP01d and EP01e is exactly the clinically
+   diagnosed - malaria treated on the strength of the presentation - and that
+   difference is the thing the chain exists to show.
+
+   Tested, not test-POSITIVE, decides EP01c. It has to be: 173 rapid tests were
+   drawn in week 35 and not one result was ever typed in, so requiring a
+   recorded positive would report a hospital that treats malaria it never
+   confirms. The recording gap is real and is reported separately; it is not a
+   reason to under-report confirmed cases.
+
+   EP01d equals EP01c on the hospital's rule that a confirmed case is a treated
+   one. Treatment is not in this data, so that is an assumption and is written
+   here where it can be argued with rather than buried. */
+SELECT  '{DIRECT_PREFIX}EP01c' AS diagnosis, mal.band, mal.sex, mal.visit,
+        COUNT(*) AS n
+FROM    mal WHERE mal.tested = 1
+GROUP BY mal.band, mal.sex, mal.visit
+
+UNION ALL
+
+SELECT  '{DIRECT_PREFIX}EP01d' AS diagnosis, mal.band, mal.sex, mal.visit,
+        COUNT(*) AS n
+FROM    mal WHERE mal.tested = 1
+GROUP BY mal.band, mal.sex, mal.visit
+
+UNION ALL
+
+SELECT  '{DIRECT_PREFIX}EP01e' AS diagnosis, mal.band, mal.sex, mal.visit,
+        COUNT(*) AS n
+FROM    mal
+GROUP BY mal.band, mal.sex, mal.visit
 
 UNION ALL
 
