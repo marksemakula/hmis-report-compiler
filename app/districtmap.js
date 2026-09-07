@@ -1,7 +1,6 @@
 'use client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import useWidth from './usewidth';
-import { apiFailure } from './lib';
 
 /* District choropleth for the region.
  *
@@ -197,6 +196,7 @@ export default function DistrictMap({ homeDistrictOnly = false }) {
   const [period, setPeriod] = useState('');
   const [mode, setMode] = useState('fixed');
   const [values, setValues] = useState(null);
+  const [applied, setApplied] = useState(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -212,12 +212,12 @@ export default function DistrictMap({ homeDistrictOnly = false }) {
         const [g, c] = await Promise.all([
           fetch('/api/py/map/geometry').then(async (r) => {
             const b = await r.json().catch(() => null);
-            if (!r.ok) throw new Error(apiFailure('/api/py/map/geometry', r.status, b, 'The district outlines'));
+            if (!r.ok) throw new Error(b?.detail || `Outlines unavailable (HTTP ${r.status}).`);
             return b;
           }),
           fetch('/api/py/map/indicators').then(async (r) => {
             const b = await r.json().catch(() => null);
-            if (!r.ok) throw new Error(apiFailure('/api/py/map/indicators', r.status, b, 'The indicator list'));
+            if (!r.ok) throw new Error(b?.detail || `Indicator list unavailable (HTTP ${r.status}).`);
             return b;
           }),
         ]);
@@ -244,6 +244,12 @@ export default function DistrictMap({ homeDistrictOnly = false }) {
   );
   const chosen = allItems.find((i) => i.id === indicator) || null;
   const periodList = catalogue?.periods?.[chosen?.periodType || 'Monthly'] || [];
+  // The selects say what will be loaded; this says what is drawn. Titles,
+  // tooltips and the key all read from here, so a map never carries the name
+  // of figures it is not showing.
+  const drawn = allItems.find((i) => i.id === applied?.indicator) || null;
+  const drawnPeriod = (catalogue?.periods?.[drawn?.periodType || 'Monthly'] || [])
+    .find((p) => p.period === applied?.period);
 
   // Changing the indicator can change the cadence, and a monthly period is not
   // a valid week. Move the period to the newest one of the new cadence rather
@@ -261,17 +267,41 @@ export default function DistrictMap({ homeDistrictOnly = false }) {
       const r = await fetch(
         `/api/py/map/values?indicator=${encodeURIComponent(indicator)}&period=${encodeURIComponent(period)}`);
       const b = await r.json().catch(() => null);
-      if (!r.ok) throw new Error(apiFailure('/api/py/map/values', r.status, b, 'The district figures'));
+      if (!r.ok) throw new Error(b?.detail || `District figures unavailable (HTTP ${r.status}).`);
       setValues(b);
+      // What is on screen, as distinct from what the selects say. Everything
+      // that describes the figure reads this, so a pending change cannot label
+      // last period's map with this period's name.
+      setApplied({ indicator, period });
     } catch (e) {
       setValues(null);
+      setApplied(null);
       setError(e.message);
     } finally {
       setBusy(false);
     }
   }, [indicator, period]);
 
-  useEffect(() => { load(); }, [load]);
+  /* Drawn once when the catalogue first offers something to draw, and after
+     that only when asked.
+
+     It used to refetch on every turn of a filter. That reads as responsive
+     until you watch someone use it: choosing an indicator and then a period is
+     two DHIS2 analytics calls, the first of which nobody wanted, and on this
+     connection each is seconds rather than milliseconds. Worse, there was no
+     way to ask for the same figures again after a timeout without nudging a
+     select to something else and back.
+
+     The key control still applies immediately, because rebanding is arithmetic
+     on figures already in the browser. Only what needs the network waits. */
+  const firstDraw = useRef(false);
+  useEffect(() => {
+    if (firstDraw.current || !indicator || !period) return;
+    firstDraw.current = true;
+    load();
+  }, [indicator, period, load]);
+
+  const pending = !applied || applied.indicator !== indicator || applied.period !== period;
 
   /* Size the drawing to the region's own proportions, not the container's.
      Busoga is tall and narrow - Namayingo runs a long way south - so an SVG
@@ -393,10 +423,24 @@ export default function DistrictMap({ homeDistrictOnly = false }) {
           <div className="form-hint">
             {mode === 'quantile'
               ? 'Bands follow this period’s spread; colours shift between periods.'
-              : chosen?.kind === 'percent'
+              : (drawn || chosen)?.kind === 'percent'
                 ? 'Same colour means the same rate in every period.'
                 : 'Four equal steps across this period’s range.'}
           </div>
+        </div>
+        {/* Enabled when the selection has moved away from what is drawn, and
+            after a failure, so a timeout can be retried without nudging a
+            select to something else and back. */}
+        <div className="map-load">
+          <button type="button" className="btn" onClick={load}
+            disabled={busy || !indicator || !period || (!pending && !error)}>
+            {busy ? 'Loading…' : 'Load'}
+          </button>
+          {pending && !busy && (
+            <div className="form-hint">
+              {applied ? 'Selection changed.' : 'Nothing drawn yet.'} Press Load.
+            </div>
+          )}
         </div>
       </div>
 
@@ -406,8 +450,9 @@ export default function DistrictMap({ homeDistrictOnly = false }) {
       <div ref={box} className={`map-body ${legendBeside ? 'beside' : ''}`}>
       <div className="map-figure" style={{ width: figureW, flex: 'none' }}>
         <svg viewBox={`0 0 ${figureW} ${figureH}`} width={figureW} height={figureH} role="img"
-          aria-label={`${chosen?.label || 'Indicator'} by district, ${
-            periodList.find((p) => p.period === period)?.label || period}`}>
+          aria-label={drawn
+            ? `${drawn.label} by district, ${drawnPeriod?.label || applied.period}`
+            : 'District outlines, no figures loaded'}>
           <defs>
             {/* Texture, not a shade: "no data" must never be mistaken for the
                 lowest band. */}
@@ -462,7 +507,7 @@ export default function DistrictMap({ homeDistrictOnly = false }) {
           }}>
             <div className="fw-bold">{hovered.name}</div>
             <div className="text-secondary">
-              {chosen?.label}: <span className="fw-medium">{fmt(hovered.value, values?.unit || '')}</span>
+              {drawn?.label}: <span className="fw-medium">{fmt(hovered.value, values?.unit || '')}</span>
             </div>
           </div>
         )}

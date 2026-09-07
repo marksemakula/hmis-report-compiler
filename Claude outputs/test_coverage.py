@@ -1,0 +1,469 @@
+"""Offline checks for zero-fill and form coverage.
+
+The rule these checks defend is short and easy to lose: we print a zero only
+where this compiler answers for the cell, and we never send one to DHIS2.
+
+Both halves matter and for different reasons.
+
+  * Print a zero in a column another team fills from a paper register and the
+    form asserts, in our name, that their work found nothing.
+  * Send a zero to DHIS2 and it is dropped in silence - measured against the
+    live instance, an import of "1" reports imported=1 and the same element
+    with "0" reports imported=0, ignored=0, no conflict. An app that counted
+    those as written would report six thousand values submitted where the
+    server kept a hundred.
+
+    python scripts/test_coverage.py
+"""
+import os
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "..", "api"))
+
+from _lib import metadata  # noqa: E402
+
+# A fixture shaped like the real 105:01: attendance and conditions on the OPD
+# age-and-sex disaggregation, plus elements on other combinations standing for
+# the nutrition, rehabilitation and GBV sections other staff fill in.
+OPD_AGE_SEX = metadata.CONSTANTS["categoryCombos"]["OPD_AGE_SEX"]["id"]
+DEFAULT_CC = metadata.CONSTANTS["categoryCombos"]["DEFAULT"]["id"]
+GBV_CC = metadata.CONSTANTS["categoryCombos"]["WARD_TYPE"]["id"]  # stand-in: not ours
+
+DES = {
+    "sv6SeKroHPV": {"name": "105-OA01. New attendance", "code": "OA01",
+                    "categoryCombo": OPD_AGE_SEX, "zeroIsSignificant": False},
+    "sQ4EexvvhVe": {"name": "105-OA02. Re-attendance", "code": "OA02",
+                    "categoryCombo": OPD_AGE_SEX, "zeroIsSignificant": False},
+    "de_malaria":  {"name": "105-EP01c. Malaria (Confirmed)", "code": "EP01c",
+                    "categoryCombo": OPD_AGE_SEX, "zeroIsSignificant": False},
+    "de_epilepsy": {"name": "105-MH26. Epilepsy", "code": "MH26",
+                    "categoryCombo": OPD_AGE_SEX, "zeroIsSignificant": False},
+    "de_default":  {"name": "105-OP01. All others", "code": "OP01",
+                    "categoryCombo": DEFAULT_CC, "zeroIsSignificant": False},
+    "de_nutrition": {"name": "105-NA07. Children admitted to OTC", "code": "NA07",
+                     "categoryCombo": GBV_CC, "zeroIsSignificant": False},
+}
+metadata._MAPPING = {
+    **metadata.CONSTANTS,
+    "dataElements": {"HMIS105_01": DES, "HMIS108": {}, "HMIS033B": {}},
+    "HMIS105_01_codeIndex": metadata._build_code_index(DES),
+    "HMIS108_codeIndex": {},
+    "HMIS033B_codeIndex": {},
+}
+
+from _lib import coverage  # noqa: E402
+
+failures = []
+
+
+def check(label, got, want):
+    if got != want:
+        failures.append(f"{label}\n     expected: {want!r}\n     actual:   {got!r}")
+        print(f"  FAIL  {label}")
+    else:
+        print(f"  ok    {label}")
+
+
+print("\nOwnership follows the disaggregation, not the name prefix")
+owned = coverage.owned_elements("OPD")
+check("attendance is ours", "sv6SeKroHPV" in owned and "sQ4EexvvhVe" in owned, True)
+check("conditions on the OPD age/sex grid are ours",
+      {"de_malaria", "de_epilepsy"} <= owned, True)
+check("a section on another disaggregation is NOT ours", "de_nutrition" in owned, False)
+check("the default-combo element is writable but not zero-filled",
+      "de_default" in owned, False)
+check("a report with no compiler owns nothing", coverage.owned_elements("MCH"), set())
+check("an unknown report owns nothing", coverage.owned_elements("NOPE"), set())
+
+print("\nThe form's true denominator")
+cells = coverage.dataset_cells("OPD")
+# 4 elements x 10 OPD age/sex cells, 1 x 1 default, 1 x 20 ward-type stand-in.
+check("every element contributes its own combination's cells", len(cells), 4 * 10 + 1 + 20)
+check("no duplicate cells", len(set(cells)), len(cells))
+
+print("\nZero-fill")
+compiled = [
+    {"dataElement": "sv6SeKroHPV", "categoryOptionCombo":
+     metadata.CONSTANTS["categoryCombos"]["OPD_AGE_SEX"]["cocs"]["20+Yrs, Female"],
+     "value": "412"},
+    {"dataElement": "de_malaria", "categoryOptionCombo":
+     metadata.CONSTANTS["categoryCombos"]["OPD_AGE_SEX"]["cocs"]["5-9Yrs, Male"],
+     "value": "37"},
+]
+shown, cov = coverage.zero_fill(compiled, "OPD")
+zeros = [v for v in shown if v.get("imputed")]
+check("compiled values are preserved untouched",
+      [v for v in shown if not v.get("imputed")], compiled)
+check("every owned cell is now present",
+      len([v for v in shown
+           if v["dataElement"] in coverage.owned_elements("OPD")]), 4 * 10)
+check("zeros fill exactly the owned cells we did not compile", len(zeros), 4 * 10 - 2)
+check("every zero is the string '0'", {v["value"] for v in zeros}, {"0"})
+check("no zero lands on a section that is not ours",
+      [v for v in zeros if v["dataElement"] == "de_nutrition"], [])
+check("no zero lands on the default-combo element",
+      [v for v in zeros if v["dataElement"] == "de_default"], [])
+check("a cell already compiled is never also zeroed",
+      len({(v["dataElement"], v["categoryOptionCombo"]) for v in shown}), len(shown))
+
+print("\nThe summary a reader is shown")
+check("cells", cov["cells"], 61)
+check("owned", cov["owned"], 40)
+check("compiled", cov["compiled"], 2)
+check("zeroFilled", cov["zeroFilled"], 38)
+check("notOurs", cov["notOurs"], 21)
+check("owned plus not-ours accounts for the whole form",
+      cov["owned"] + cov["notOurs"], cov["cells"])
+
+print("\nZeros must never reach DHIS2")
+# The push payload is built from a report's stored compiled_data, which is what
+# the compiler returned. zero_fill is a rendering step and its output must be
+# distinguishable, so that no future caller can hand it to the push by accident.
+check("every imputed value is flagged",
+      all(v.get("imputed") for v in shown if v["value"] == "0" and v not in compiled), True)
+check("nothing the compiler produced is flagged",
+      any(v.get("imputed") for v in compiled), False)
+real = [v for v in shown if not v.get("imputed")]
+check("stripping imputed values returns exactly the compiled set", real, compiled)
+
+# The payload builder is the last gate. Hand it the *displayed* values - the
+# mistake a future caller is most likely to make - and it must still send only
+# what was measured.
+from _lib import dhis2  # noqa: E402
+# The attribute option combo is resolved from the live instance. Stubbed here
+# so the filter can be checked on a machine with no credentials and no network,
+# which is the point of this suite.
+dhis2.resolve_attribute_option_combo = lambda *a, **k: None
+payload = dhis2.build_payload("OPD", "202606", shown)
+check("build_payload drops every imputed zero", len(payload["dataValues"]), len(compiled))
+check("build_payload keeps the measured figures",
+      sorted(v["value"] for v in payload["dataValues"]), ["37", "412"])
+check("no zero survives into the payload",
+      [v for v in payload["dataValues"] if v["value"] == "0"], [])
+
+print("\nA measured zero and an imputed zero must be distinguishable")
+from _lib import forms  # noqa: E402
+measured_zero = {"dataElement": "de_epilepsy", "categoryOptionCombo":
+                 metadata.CONSTANTS["categoryCombos"]["OPD_AGE_SEX"]["cocs"]["20+Yrs, Male"],
+                 "value": "0"}
+shown2, _ = coverage.zero_fill(compiled + [measured_zero], "OPD")
+keys = forms.imputed_keys(shown2)
+mkey = f'{measured_zero["dataElement"]}-{measured_zero["categoryOptionCombo"]}'
+check("a compiled zero is not marked imputed", mkey in keys, False)
+check("imputed keys cover the rest", len(keys), 4 * 10 - 3)
+
+print("\nEmpty and degenerate inputs")
+check("no compiled values still zero-fills the owned grid",
+      coverage.zero_fill([], "OPD")[1]["zeroFilled"], 40)
+check("None is treated as empty", coverage.zero_fill(None, "OPD")[1]["compiled"], 0)
+check("a report with no compiler zero-fills nothing",
+      coverage.zero_fill([], "MCH")[1]["zeroFilled"], 0)
+
+print()
+if failures:
+    print(f"{len(failures)} check(s) failed:\n")
+    for f in failures:
+        print("  - " + f)
+    sys.exit(1)
+print("All checks passed.")
+
+
+# ---------------------------------------------------------------------------
+# The ICD-11 / HMIS namespace collision, 3 September 2026.
+#
+# ClinicMaster records diagnoses as ICD-11 stems. HMIS 105 has its own codes.
+# They have the same shape and they OVERLAP, and the compiler was looking a
+# ClinicMaster code up directly in the HMIS index. July 2026 compiled as:
+#
+#   CA01 Acute sinusitis         -> 105-CA01. Cervical Cancer        1 case
+#   CA02 Acute pharyngitis       -> 105-CA02. Prostate Cancer       13 cases
+#   CA03 Acute tonsillitis       -> 105-CA03. Breast Cancer         18 cases
+#   CA04 Acute laryngopharyngitis-> 105-CA04. Lung Cancer            5 cases
+#   CA07 Acute URTI              -> 105-CA07. Colorectal Cancer      1 case
+#   NE10 Burns, multiple regions -> 105-NE10. Child abuse & Neglect  2 cases
+#
+# Thirty-three cancers and two child-protection cases that did not exist, bound
+# for the national figures. It was visible only because the distribution was
+# absurd: prostate cancer in a four-year-old girl, breast cancer in boys aged
+# five to nine. Plausible collisions would have gone through unnoticed.
+#
+# The disease names below are verbatim from ClinicMasterMOH.dbo.Diseases.
+# ---------------------------------------------------------------------------
+print("\nAn ICD-11 code must never be read as an HMIS code")
+from _lib import diagnosis_map as dmap  # noqa: E402
+
+COLLIDING = {
+    "CA01": ("ACUTE SINUSITIS", "Cervical Cancer"),
+    "CA02": ("ACUTE PHARYNGITIS", "Prostate Cancer"),
+    "CA03": ("ACUTE TONSILLITIS", "Breast Cancer"),
+    "CA04": ("ACUTE LARYNGOPHARYNGITIS", "Lung Cancer"),
+    "CA07": ("ACUTE UPPER RESPIRATORY INFECTIONS", "Colorectal Cancer"),
+    "NE10": ("BURNS OF MULTIPLE BODY REGIONS", "Child abuse and Neglect"),
+}
+idx = metadata._MAPPING["HMIS105_01_codeIndex"]
+for code, (real, wrong) in COLLIDING.items():
+    got = dmap.map_diagnosis(code, idx, source="icd11")
+    check(f"{code} ({real}) is not compiled as {wrong}", got == code, False)
+
+print("\n...and it resolves to the right thing instead")
+for code, want in [("CA01", "EN05"), ("CA02", "EN17"), ("CA03", "EN13"),
+                   ("CA04", "EN17"), ("CA07", "CD11")]:
+    check(f"{code} -> {want}", dmap.icd11_to_hmis(code), want)
+check("an unmapped ICD-11 code goes to All others, not nowhere",
+      dmap.map_diagnosis("NE10", idx, source="icd11"), "OP01")
+check("an ICD-11 code with no entry still counts",
+      dmap.map_diagnosis("ZZ99", idx, source="icd11"), "OP01")
+check("blank stays blank", dmap.map_diagnosis("", idx, source="icd11"), "")
+
+print("\nThe EMR path is unchanged: a typed HMIS code is still honoured")
+check("a records officer typing CV02 still means CV02",
+      dmap.map_diagnosis("CV02", {"CV02": "de_x"}), "CV02")
+check("free text still maps clinically",
+      dmap.map_diagnosis("ESSENTIAL HYPERTENSION", {}), "CV02")
+check("the same string under icd11 does NOT identity-match",
+      dmap.map_diagnosis("CV02", {"CV02": "de_x"}, source="icd11"), "OP01")
+
+print("\nThe generated table is present and sane")
+tbl = dmap.icd11_map()
+check("table loaded", len(tbl) > 2000, True)
+check("every value is an HMIS code, never an ICD-11 passthrough",
+      [k for k, v in tbl.items() if k == v], [])
+check("no entry maps to All others; absence means All others",
+      [k for k, v in tbl.items() if v == "OP01"], [])
+
+print("\nThe compiler must ask for the namespace, not guess it")
+import inspect  # noqa: E402
+from _lib import compiler as srv  # noqa: E402
+src = inspect.getsource(srv.compile_opd_strata)
+check("compile_opd_strata declares its diagnoses are ICD-11",
+      'source="icd11"' in src, True)
+
+print("\nCode normalisation must be identical when the table is built and read")
+# Jinja's dictionary carries local codes typed by hand beside the ICD-11 stems:
+# fifteen are lower-case and eighteen contain a space. The table was first built
+# verbatim and read back upper-cased, so 'k8956' (Upper respiratory tract
+# infection, 123 cases in July 2026) and 'nr302' (Tinea pedis) silently became
+# All others.
+check("lower case resolves", dmap.icd11_to_hmis("k8956"), "CD11")
+check("upper case resolves to the same thing", dmap.icd11_to_hmis("K8956"), "CD11")
+check("mixed case resolves too", dmap.icd11_to_hmis("K8956"), dmap.icd11_to_hmis("k8956"))
+check("another real lower-case code", dmap.icd11_to_hmis("nr302"), "CD14")
+check("internal spaces are ignored",
+      dmap.normalise_code("DO 970"), dmap.normalise_code("DO970"))
+check("surrounding whitespace is ignored",
+      dmap.normalise_code("  1C61  "), "1C61")
+check("every stored key is already in normal form",
+      [k for k in dmap.icd11_map() if k != dmap.normalise_code(k)], [])
+check("blank normalises to blank", dmap.normalise_code(None), "")
+
+print("\nA record is classified by its subject, not a co-morbidity in passing")
+# ClinicMaster's dictionary spells HIV both ways. Matching only "HIV DISEASE"
+# sent "HUMAN IMMUNODEFICIENCY VIRUS DISEASE ASSOCIATED WITH MALARIA" down the
+# clinical rules, where MALARIA caught it and it was reported to the Ministry
+# as a confirmed malaria case.
+import importlib  # noqa: E402
+
+
+def _classify_name(name):
+    """What the generator would make of a disease name."""
+    upper = name.upper()
+    for rx, code in dmap._POLICY:
+        if rx.search(upper):
+            return code
+    for rx, code in dmap._EMR:
+        if rx.search(upper):
+            return code
+    return None
+
+
+for name in [
+    "HIV DISEASE CLINICAL STAGE 1 WITHOUT MENTION OF TUBERCULOSIS",
+    "HUMAN IMMUNODEFICIENCY VIRUS DISEASE ASSOCIATED WITH MALARIA",
+    "HIV DISEASE CLINICAL STAGE 1 ASSOCIATED WITH MALARIA",
+    "HUMAN IMMUNODEFICIENCY VIRUS DISEASE WITHOUT MENTION OF TUBERCULOSIS",
+]:
+    check(f"HIV record not filed as its co-morbidity: {name[:44]}",
+          _classify_name(name), dmap.HIV_CODE)
+
+check("a genuine malaria record is still malaria",
+      _classify_name("MALARIA DUE TO PLASMODIUM FALCIPARUM"), "EP01c")
+check("...including the unspecified form",
+      _classify_name("MALARIA, UNSPECIFIED"), "EP01c")
+check("no HIV-named code survives in the table as a malaria mapping",
+      [k for k, v in dmap.icd11_map().items() if v == "EP01c" and k.startswith("1C6")], [])
+
+print("\nA partial import must explain itself, not just report a shortfall")
+# Week 35 of 2026 compiles eleven 033B values, five of which are genuine
+# measured zeros: MA02, MA03, GP02, GP04, GP05. DHIS2 keeps six. Without an
+# explanation the app reports "6 of 11" and looks broken when it is correct.
+import types  # noqa: E402
+
+
+def _fake_submit(imported, sent, zeros, ignored=0, held="sent", readback=True):
+    """Drive dhis2.submit's response handling without a network.
+
+    `held` says what the server reports when the period is read back: "sent"
+    means it holds exactly what was submitted, "none" that it holds nothing.
+    `readback` False removes the GET altogether, standing for a network fault
+    during verification."""
+    payload = {"dataSet": "ds", "period": "202607", "orgUnit": "ou",
+               "dataValues": [{"dataElement": f"de{i}", "categoryOptionCombo": "c",
+                               "value": "0" if i < zeros else str(i + 1)}
+                              for i in range(sent)]}
+
+    class R:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"status": "SUCCESS",
+                    "importCount": {"imported": imported, "updated": 0,
+                                    "ignored": ignored, "deleted": 0},
+                    "conflicts": []}
+        text = ""
+
+    class G:
+        status_code = 200
+
+        @staticmethod
+        def raise_for_status():
+            return None
+
+        @staticmethod
+        def json():
+            if held == "none":
+                return {"dataValues": []}
+            # The server holds every non-zero value that was sent. A zero is
+            # never held: this instance discards it.
+            return {"dataValues": [
+                {"dataElement": v["dataElement"], "categoryOptionCombo": "c",
+                 "value": v["value"]}
+                for v in payload["dataValues"] if v["value"] != "0"]}
+
+    sess = types.SimpleNamespace(post=lambda *a, **k: R())
+    if readback:
+        sess.get = lambda *a, **k: G()
+    dhis2._session = lambda: sess
+    dhis2.resolve_attribute_option_combo = lambda *a, **k: None
+    return dhis2.submit(payload)
+
+
+res = _fake_submit(imported=6, sent=11, zeros=5, readback=False)
+check("a shortfall is reported honestly as accepted", res["accepted"], True)
+check("it says how many of how many were stored",
+      "stored 6 of the 11" in res["description"], True)
+check("it names zeros as the reason", "5 of them were zeros" in res["description"], True)
+check("it explains that this is not a fault",
+      "absent cell IS the zero" in res["description"], True)
+check("the counts are carried for the UI",
+      (res["valuesSent"], res["zerosSent"]), (11, 5))
+
+full = _fake_submit(imported=11, sent=11, zeros=0)
+check("a complete import says nothing extra", full["description"], "")
+check("...and asks the server nothing it need not ask", full["verification"], None)
+
+nothing = _fake_submit(imported=0, sent=11, zeros=0, readback=False)
+check("nothing stored, with the read-back unavailable, still explains itself",
+      "stored none of the 11" in nothing["description"], True)
+check("...names the fault rather than hiding it",
+      "could not be read back" in nothing["description"], True)
+check("...allows that it may be a report with nothing left to change",
+      "nothing left to change" in nothing["description"], True)
+check("...and still says what to check",
+      "data capture rights" in nothing["description"], True)
+
+print("\nA submission that writes nothing is not a failed submission")
+# July 2026, submitted a third time on 3 September 2026: 325 values sent,
+# imported=0, updated=0, ignored=325, no conflicts, status SUCCESS. Every one
+# was already on the server with the figure sent. The app called that
+# "Submission failed: DHIS2 accepted the request but ignored all 325 value(s)".
+unchanged = _fake_submit(imported=0, sent=325, zeros=0, ignored=325)
+check("a re-submission of identical figures is accepted", unchanged["accepted"], True)
+check("...because the period was read back", unchanged["verification"]["matching"], 325)
+check("...with nothing unaccounted for", unchanged["verification"]["unaccounted"], 0)
+check("...and it says the server already held them",
+      "325 already held with the same figure" in unchanged["description"], True)
+check("...naming the read-back as the evidence",
+      "read back from DHIS2" in unchanged["description"], True)
+check("...and never accuses DHIS2 of ignoring the report",
+      "ignored all" in unchanged["description"], False)
+
+# The mixed case, which is what a corrected report looks like: a few new
+# figures, a few changed, the rest untouched since the last submission.
+mixed = _fake_submit(imported=3, sent=325, zeros=0, ignored=297)
+check("a partly-changed report is accepted", mixed["accepted"], True)
+check("...and separates what was written from what was already there",
+      "3 written just now; 322 already held" in mixed["description"], True)
+
+# The observed shape for a discarded zero is imported=0 AND ignored=0, which
+# is why an all-zero push once looked like silence.
+all_zero = _fake_submit(imported=0, sent=11, zeros=11)
+check("an all-zero push is accepted, because nothing was owed to the server",
+      all_zero["accepted"], True)
+check("...counted as zeros rather than as missing values",
+      all_zero["verification"]["zerosDropped"], 11)
+check("...and explained as correct rather than as a failure",
+      "absent cell IS the zero" in all_zero["description"], True)
+
+# A real failure must still read as one, and now it can be shown rather than
+# guessed at: the server is asked, and it holds nothing.
+lost = _fake_submit(imported=0, sent=11, zeros=0, ignored=11, held="none")
+check("values that never arrived are not called accepted", lost["accepted"], False)
+check("...and are counted", lost["verification"]["missingCount"], 11)
+check("...and named as absent from the server",
+      "11 of the 11 values are not on the server" in lost["description"], True)
+check("...with the rows carried for display", len(lost["verification"]["missing"]), 10)
+
+
+# ---------------------------------------------------------------------------
+# The category-combination override, found 7 September 2026.
+#
+# August 2026 was submitted and accepted, and the form showed nothing against
+# Sickle Cell Disease. The values were in DHIS2 the whole time - 370 of them -
+# sitting on category option combos the form has no field for.
+#
+# A data set may override the disaggregation a data element is reported under,
+# and 105:01 overrides seventeen of its 623. Sickle cell, hypertension, asthma,
+# COPD and epilepsy are reported by NEW versus KNOWN case as well as by age and
+# sex, so the form draws twenty boxes for each of them. The compiler read the
+# element's own combination, wrote the ten age-and-sex boxes, and DHIS2 accepted
+# every one: they are valid combos of that combination. 2,110 values for August
+# went somewhere nobody can open.
+#
+# It is the same failure as reporting into a retired element, one level down.
+print("\n-- the disaggregation the FORM uses, not the element's own --")
+from _lib.metadata import CONSTANTS as _C                            # noqa: E402
+
+_nk = _C["categoryCombos"].get("OPD_NEW_KNOWN_AGE_SEX", {})
+check("the new-versus-known combination is known to the compiler",
+      bool(_nk.get("id")), True)
+check("...with all twenty of the boxes the form draws",
+      len(_nk.get("cocs", {})), 20)
+# Both halves of every age and sex cell, so no row can fall between them.
+_bands = ["0-28Dys", "29Dys-4Yrs", "5-9Yrs", "10-19Yrs", "20+Yrs"]
+_want = {f"{s}, {b}, {x}" for s in ("New", "Known") for b in _bands
+         for x in ("Male", "Female")}
+check("...covering every state, band and sex",
+      _want - set(_nk.get("cocs", {})), set())
+check("...and no option combo used twice",
+      len(set(_nk.get("cocs", {}).values())), 20)
+
+_meta = open(os.path.join(HERE, "..", "api", "_lib", "metadata.py")).read()
+check("the fetch asks the data set for its own combination",
+      "dataSetElements[categoryCombo[id]" in _meta, True)
+check("...and the override wins over the element's",
+      'e.get("categoryCombo") or de["categoryCombo"]' in _meta, True)
+check("...while the element's own is kept, so the difference is visible",
+      '"elementCategoryCombo"' in _meta, True)
+
+_comp = open(os.path.join(HERE, "..", "api", "_lib", "compiler.py")).read()
+check("the compiler writes the new-versus-known boxes",
+      'OPD_NEW_KNOWN_AGE_SEX' in _comp, True)
+check("...taking new or known from the visit, as the attendance lines do",
+      'state = "New" if r["visit_type"] == "New" else "Known"' in _comp, True)
+# Cancers and diabetes carry their own disaggregations that we hold no option
+# combos for. Refusing them is the point: a refused value is reviewed, an
+# accepted one in the wrong box is lost.
+check("and refuses a disaggregation it has no boxes for",
+      'non-standard disaggregation' in _comp, True)

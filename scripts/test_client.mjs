@@ -188,6 +188,28 @@ check('the names are painted with a halo so they read over any band',
       map.includes('paintOrder="stroke"'), true);
 check('the map fills the card width', /let w = width;/.test(map), true);
 
+console.log('\nThe district map is loaded on request, not on every keystroke');
+// It used to refetch on every turn of a filter: choosing an indicator and then
+// a period was two DHIS2 analytics calls, the first of which nobody wanted,
+// and there was no way to ask again after a timeout except to nudge a select
+// to something else and back.
+check('there is a Load button', /onClick=\{load\}/.test(map), true);
+check('...disabled while a fetch is in flight', /disabled=\{busy/.test(map), true);
+check('...and when the selection matches what is drawn',
+      map.includes('!pending && !error'), true);
+check('the map still draws itself once on arrival',
+      map.includes('firstDraw.current = true'), true);
+check('but no longer refetches on every filter change',
+      map.includes('useEffect(() => { load(); }, [load]);'), false);
+// Rebanding is arithmetic on figures already in the browser, so the key
+// control must not be made to wait for the network with the other two.
+check('the key control still applies immediately',
+      /setMode\(e\.target\.value\)/.test(map), true);
+// A pending change must not relabel the map it has not yet redrawn.
+check('the figure is titled by what it draws, not what is selected',
+      map.includes('aria-label={drawn'), true);
+check('...and so is the hover tooltip', map.includes('{drawn?.label}:'), true);
+
 console.log();
 if (failures.length) {
   console.log(`${failures.length} check(s) failed:\n`);

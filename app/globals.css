@@ -214,21 +214,13 @@ main {
 .subheader,
 .datagrid-title {
   font-size: .75rem;
-  font-weight: var(--tblr-font-weight-bold);
+  font-weight: var(--tblr-font-weight-medium);
   text-transform: uppercase;
   letter-spacing: .04em;
   line-height: 1rem;
-  /* Blue, not black. With the body text darkened these small labels were the
-     same colour as the figures under them, which flattened the hierarchy; a
-     blue eyebrow names the figure without competing with it. */
-  color: var(--tblr-primary);
+  color: var(--tblr-secondary);
   margin: 0 0 .25rem;
 }
-
-/* A figure that is progress reads blue, one that is a problem reads red. */
-.stat-value.is-primary { color: var(--tblr-primary); }
-.stat-value.is-danger  { color: var(--tblr-danger); }
-.stat-value.is-success { color: #1f7a30; }
 .page-title {
   margin: 0;
   font-size: 1.25rem;
@@ -431,19 +423,6 @@ main {
 .row-cards > * { margin-bottom: 0; }
 .row-cards .card { margin-bottom: 0; height: 100%; }
 
-/* A row whose cards keep their own height.
-   Filling the row is right when the cards are within a hundred pixels of each
-   other, which is what a line of counters is. It is wrong the moment one of
-   them is a chart three times the height of a counter: the counters become
-   tall empty boxes, and a reader looks at four hundred pixels of white
-   wondering what is missing from them. Ragged bottoms are the smaller cost. */
-.row-cards.own-height { align-items: start; }
-.row-cards.own-height .card { height: auto; }
-
-/* A column of cards inside one row-cards cell, for tiles too short to earn a
-   column each. */
-.card-stack { display: grid; gap: var(--tblr-page-padding); align-content: start; }
-
 .datagrid {
   display: grid;
   gap: 1.5rem;
@@ -573,22 +552,6 @@ input[type="checkbox"], input[type="radio"] {
   cursor: pointer;
 }
 input[type="file"] { padding: .3125rem 1rem .3125rem .3125rem; }
-
-/* A compact control and its label, for a filter row sitting above a chart.
-   Full-size fields are right on a form, where the field is the subject. On a
-   card whose subject is the chart, a stack of them takes the space the chart
-   is there to use, so the row shrinks and the chart keeps the card. */
-input.sm, select.sm, textarea.sm, .form-control.sm, .form-select.sm {
-  padding: .3125rem .625rem;
-  font-size: .8125rem;
-  line-height: 1.125rem;
-}
-select.sm, .form-select.sm {
-  padding-right: 1.875rem;
-  background-position: right .5rem center;
-  background-size: 14px 10px;
-}
-.form-label.sm, label.sm { margin-bottom: .1875rem; font-size: .75rem; }
 input[type="file"]::file-selector-button {
   margin-right: .75rem;
   padding: .375rem .75rem;
@@ -883,6 +846,12 @@ tbody tr:hover td { background: rgba(var(--tblr-body-color-rgb), .02); }
   align-items: end;
 }
 .map-filters label { margin-bottom: .25rem; font-size: .75rem; color: var(--tblr-secondary); }
+/* The Load button sits on the baseline of the selects, not stretched to their
+   height. Its hint sits under it in the same place a select's hint would, so
+   the row keeps one alignment however many of the cells carry a hint. */
+.map-load { display: flex; flex-direction: column; align-items: flex-start; }
+.map-load .btn { min-width: 6rem; justify-content: center; }
+.map-load .form-hint { margin-top: .25rem; }
 
 /* The figure keeps the region's own proportions, so a tall narrow region does
    not stretch across a wide card. Whatever width that leaves goes to the
