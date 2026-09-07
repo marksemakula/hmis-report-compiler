@@ -111,6 +111,14 @@ for name in scripts:
     src = open(os.path.join(SQL_DIR, name)).read()
     print(f"\n{name}")
 
+    # The header block of every script explains what it does, in English that
+    # quotes the SQL keywords it is explaining. Scanning the raw file for a
+    # construct therefore finds the prose describing it as readily as the code,
+    # which is how the GROUP BY check below first failed on the very script
+    # whose comment explains why the construct is not there.
+    code = re.sub(r"/\*.*?\*/", " ", src, flags=re.S)             # block comments
+    code = re.sub(r"--[^\n]*", " ", code)                          # line comments
+
     # --- read-only ---------------------------------------------------------
     # Writes are permitted only against the temp table each script builds.
     writes = re.findall(r"\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM|MERGE\s+INTO)\s+(\S+)",
@@ -129,15 +137,47 @@ for name in scripts:
     check("the only procedure executed is sp_executesql",
           sorted({e.lower() for e in execs} - {"sp_executesql"}), [])
 
+    # --- GROUP BY ----------------------------------------------------------
+    # SQL Server refuses a subquery in a GROUP BY list rather than evaluating
+    # it:
+    #
+    #     Msg 144 - Cannot use an aggregate or a subquery in an expression
+    #     used for the group by list of a GROUP BY clause
+    #
+    # It is an easy thing to write, because grouping by the same CASE you
+    # selected is the ordinary way to group by a computed column, and it only
+    # stops being legal once that CASE contains an EXISTS. Compute the flag in
+    # a derived table and group by the resulting column instead - which also
+    # spares you keeping two copies of one rule in step.
+    for clause in re.findall(r"\bGROUP\s+BY\b(.*?)(?=\bUNION\b|\bORDER\s+BY\b"
+                             r"|\bHAVING\b|;|\Z)", code, re.I | re.S):
+        check("no subquery in a GROUP BY list",
+              bool(re.search(r"\(\s*SELECT\b|\bEXISTS\s*\(", clause, re.I)), False)
+
+    # --- collation ---------------------------------------------------------
+    # ClinicMaster's catalogue views are Latin1_General_CI_AS_KS_WS while the
+    # database itself is SQL_Latin1_General_CP1_CI_AS. A UNION between the two
+    # does not degrade or warn, it refuses to compile:
+    #
+    #     Msg 451 - Cannot resolve collation conflict between
+    #     "SQL_Latin1_General_CP1_CI_AS" and "Latin1_General_CI_AS_KS_WS"
+    #
+    # which the reader discovers only after carrying the script to a machine on
+    # the hospital network. sys.objects.type_desc is the column that carries the
+    # catalogue collation explicitly, so wherever it meets a user table in a
+    # UNION it has to be pinned back to the database default.
+    if re.search(r"\bUNION\b", src, re.I):
+        loose = re.findall(r"\btype_desc\b(?!\s+COLLATE)", src, re.I)
+        check("catalogue collations are pinned where they meet user tables",
+              loose, [])
+
     # --- one grid ----------------------------------------------------------
     # Azure Data Studio saves one grid per CSV, so a script returning several
     # loses all but the first - which cost two round trips before every script
     # was made to return exactly one. A SELECT returns a grid unless it is
     # feeding an INSERT or assigning to a variable, so those are stripped and
     # what remains must be a single statement-initial SELECT.
-    stripped = re.sub(r"/\*.*?\*/", " ", src, flags=re.S)          # block comments
-    stripped = re.sub(r"--[^\n]*", " ", stripped)                  # line comments
-    stripped = re.sub(r"N?'(?:[^']|'')*'", "''", stripped)         # string literals
+    stripped = re.sub(r"N?'(?:[^']|'')*'", "''", code)             # string literals
     stripped = re.sub(r"\bINSERT\s+INTO\s+#\w+[^;]*?\bSELECT\b", " ", stripped, flags=re.I | re.S)
     stripped = re.sub(r"\bSELECT\s+@\w+\s*=", " ", stripped, flags=re.I)
     grids = [m for m in re.finditer(r"\bSELECT\b", stripped, re.I)

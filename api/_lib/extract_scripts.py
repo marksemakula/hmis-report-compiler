@@ -41,11 +41,117 @@ BAND_RULES = [
 # 15F 143,326 · 15M 82,267 · 15N 31.
 SEX_CODES = {"15F": "Female", "15M": "Male"}
 
+# Which visits are outpatient ones.
+#
+# This used to read `ISNULL(vv.VisitStatusID, '') <> '9IP'`, on the reasoning
+# that a visit ending in admission is an inpatient episode. Measured against
+# August 2026 that reasoning was wrong twice over.
+#
+# It disagrees with ClinicMaster itself. The front end's own "Diagnosis OPD"
+# table separates outpatient from inpatient on Diagnosis.VisitType, which is
+# where the distinction is actually recorded, and it counts the 105 August
+# diagnoses that this filter was discarding - one of them a sickle cell case.
+#
+# It is also wrong on the Ministry's terms. A client walks into the outpatient
+# department, is seen, and is admitted: that is one OPD attendance and one
+# admission, counted on 105 and on 108 respectively. Dropping the attendance
+# because of what happened next loses a real event from the outpatient return.
+#
+# The visit is therefore taken as it stands, and VisitType decides the split.
+#
+# What does decide it, on the rule the hospital gave, is where the client sits:
+# an OPD client is one whose community is not an in-patient ward, a ward being
+# any community whose name contains the word Ward.
+#
+# That name is not stored anywhere. ClinicMaster keeps every coded list in one
+# place and reads it through a function, the same one that turns 15F into
+# Female, which is why searching the catalogue for a community table came back
+# empty. The front end writes it as
+#
+#     dbo.GetLookupDataDes(Visits.CommunityID) as Community
+#
+# and so does this, which means the extract and the screen a records officer
+# checks it against cannot disagree about what a community is called.
+WARD_MARKER = "Ward"
+
+# In-patient areas whose names do not contain the word Ward.
+#
+# August used 36 communities. The word caught two of them, Maternity Ward and
+# GYNAECOLOGY WARD, and missed NICU and ICU, which the hospital identifies as
+# wards in everything but name. Neither is inferred; both were named.
+#
+# Listed by exact name and not by pattern, deliberately. '%ICU%' would take NICU
+# today and whatever is opened next year without anyone noticing, and a rule
+# that silently widens its own scope is how attendances go missing. Every
+# exclusion here is a decision somebody made and can be checked against the
+# roll-call in scripts/sql/17_ward_communities.sql, which carries the same list
+# and is held to it by scripts/test_scripts.py.
+WARD_COMMUNITIES = ("ICU", "NICU")
+
+# Entry points, where the visit alone does not settle the question.
+#
+# Accident and Emergency is where admission to most wards is done, so it is an
+# in-patient area in the sense that matters. But traffic runs both ways through
+# it. Of August's 1,147 A&E visits, 930 ended in an admission and 217 did not:
+# those 217 were seen in casualty and went home, which is an outpatient
+# attendance and belongs on the 105.
+#
+# So A&E is not excluded for being A&E. It is excluded for the visit having
+# become an admission, which is the thing that actually makes a client an
+# inpatient. Treating the whole department as a ward would have cost the return
+# 217 attendances in one month, and treating none of it as one would have added
+# 930 admissions to the outpatient count.
+ENTRY_POINT_COMMUNITIES = ("ACCIDENT AND EMERGENCY",)
+
+
+def _community_cte(start: date, end_exclusive: date) -> str:
+    """The period's communities, resolved to their names, once each.
+
+    GetLookupDataDes is a scalar function, and SQL Server runs those row by row
+    unless it can inline them. Called in the WHERE clause it would fire once per
+    visit - fifteen thousand times for a month at Jinja - where thirty calls do
+    the same work, one per distinct community. Resolving them first and joining
+    is the difference between a query that returns and one that is killed."""
+    return f"""used AS (
+    SELECT  DISTINCT vv.CommunityID
+    FROM    {DATABASE}.dbo.Visits vv
+    WHERE   vv.VisitDate >= '{start.isoformat()}'
+      AND   vv.VisitDate <  '{end_exclusive.isoformat()}'
+), comm AS (
+    SELECT  u.CommunityID,
+            ISNULL({DATABASE}.dbo.GetLookupDataDes(u.CommunityID), '') AS name
+    FROM    used u
+), """
+
+
 # The row that carries visit counts rather than a condition.
 ATTENDANCE_SENTINEL = "(attendance)"
 
 DATABASE = "ClinicMasterMOH"
 DEFAULT_SERVER = "172.20.0.230"
+
+# A visit with no community at all is kept. Absence of a ward name is not
+# evidence of a ward, and discarding the unclassifiable is how a return quietly
+# loses attendances nobody can account for afterwards.
+#
+# Defined below DATABASE rather than beside the lists it reads, and the reason
+# is worth a line: this is an f-string evaluated once at import, and the query
+# templates interpolate its VALUE. A {DATABASE} left in it is never expanded by
+# anyone - it reaches the generated script as five literal characters and the
+# hospital gets a syntax error. So every name it needs must already exist here.
+_NAMED_WARDS = ", ".join(f"'{name}'" for name in WARD_COMMUNITIES)
+_ENTRY_POINTS = ", ".join(f"'{name}'" for name in ENTRY_POINT_COMMUNITIES)
+_NAME = "LTRIM(RTRIM(ISNULL(comm.name, '')))"
+
+# EXISTS is legal in a WHERE clause; it is a GROUP BY list that refuses one.
+OPD_VISIT_FILTER = (
+    f"\n      AND   ISNULL(comm.name, '') NOT LIKE '%{WARD_MARKER}%'"
+    f"\n      AND   {_NAME} NOT IN ({_NAMED_WARDS})"
+    f"\n      AND   NOT ({_NAME} IN ({_ENTRY_POINTS})"
+    f"\n                AND EXISTS (SELECT 1 FROM {DATABASE}.dbo.Admissions a"
+    f"\n                            WHERE  a.VisitNo = vv.VisitNo))"
+)
+COMMUNITY_JOIN = "\n    LEFT JOIN comm ON comm.CommunityID = vv.CommunityID"
 
 OS_CHOICES = {
     "windows": {"label": "Microsoft Windows", "ext": "ps1", "runtime": "PowerShell"},
@@ -126,16 +232,15 @@ def opd_sql(start: date, end_exclusive: date) -> str:
 
     New versus re-attendance follows the Ministry rule: a client's first visit
     in the period is new, later visits are re-attendances."""
-    return f"""WITH v AS (
+    return f"""WITH {_community_cte(start, end_exclusive)}v AS (
     SELECT  vv.VisitNo,
             vv.PatientNo,
             vv.VisitDate,
             ROW_NUMBER() OVER (PARTITION BY vv.PatientNo ORDER BY vv.VisitDate, vv.VisitNo)
                 AS seq_in_period
-    FROM    {DATABASE}.dbo.Visits vv
+    FROM    {DATABASE}.dbo.Visits vv{COMMUNITY_JOIN}
     WHERE   vv.VisitDate >= '{start.isoformat()}'
-      AND   vv.VisitDate <  '{end_exclusive.isoformat()}'
-      AND   ISNULL(vv.VisitStatusID, '') <> '9IP'   -- exclude inpatient episodes
+      AND   vv.VisitDate <  '{end_exclusive.isoformat()}'{OPD_VISIT_FILTER}
 ), b AS (
     SELECT  v.VisitNo,
             CASE WHEN p.BirthDate IS NULL OR p.BirthDate < '1900-01-02' THEN NULL
@@ -199,16 +304,15 @@ def opd_strata_sql(start: date, end_exclusive: date) -> str:
     of birth is not a visit in the 0-28 day column."""
     band = _band_case("b.age_years")
     sexes = ", ".join(f"('{code}', '{name}')" for code, name in SEX_CODES.items())
-    return f"""WITH v AS (
+    return f"""WITH {_community_cte(start, end_exclusive)}v AS (
     SELECT  vv.VisitNo,
             vv.PatientNo,
             vv.VisitDate,
             ROW_NUMBER() OVER (PARTITION BY vv.PatientNo ORDER BY vv.VisitDate, vv.VisitNo)
                 AS seq_in_period
-    FROM    {DATABASE}.dbo.Visits vv
+    FROM    {DATABASE}.dbo.Visits vv{COMMUNITY_JOIN}
     WHERE   vv.VisitDate >= '{start.isoformat()}'
-      AND   vv.VisitDate <  '{end_exclusive.isoformat()}'
-      AND   ISNULL(vv.VisitStatusID, '') <> '9IP'
+      AND   vv.VisitDate <  '{end_exclusive.isoformat()}'{OPD_VISIT_FILTER}
 ), b AS (
     SELECT  v.VisitNo,
             CASE WHEN p.BirthDate IS NULL OR p.BirthDate < '1900-01-02' THEN NULL

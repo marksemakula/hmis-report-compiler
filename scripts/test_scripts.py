@@ -128,7 +128,74 @@ check("joins Diagnosis on TreatmentNo, since it has no VisitNo",
       "d.TreatmentNo = b.VisitNo" in sql, True)
 check("joins on the ICD-11 code, not the drifting name",
       ("d.DiseaseCode" in sql, "DiseaseName" in sql), (True, False))
-check("inpatient episodes excluded from OPD attendance", "'9IP'" in sql, True)
+# VisitType, not VisitStatusID, decides who is an outpatient. Filtering the
+# visit on '9IP' dropped 105 of August 2026's 9,144 OPD diagnoses, one of them
+# a sickle cell case ClinicMaster's own "Diagnosis OPD" table counts. A client
+# seen in outpatients and then admitted is one attendance and one admission,
+# not one admission alone.
+check("the visit is not filtered on its status", "'9IP'" in sql, False)
+check("and VisitType makes the diagnosis OPD/IPD split",
+      sql.count("= 'Out Patient'"), 1)
+
+# The client's community decides who is an outpatient. ClinicMaster stores no
+# community name anywhere; it resolves every coded list through one function,
+# and the front end reads the community that way. Writing it the same way is
+# what stops the extract and the screen it is checked against disagreeing.
+check("the community name is read the way ClinicMaster reads it",
+      "GetLookupDataDes" in sql, True)
+check("wards are excluded by name", "NOT LIKE '%Ward%'" in sql, True)
+# The word caught Maternity Ward and GYNAECOLOGY WARD in August and missed NICU
+# and ICU, which are wards in everything but name. Those are named, not guessed.
+check("and the wards that are not called wards are named too",
+      all(f"'{w}'" in sql for w in gen.WARD_COMMUNITIES), True)
+# By exact name, never by pattern: '%ICU%' would take NICU today and whatever
+# opens next year, and a rule that widens its own scope loses attendances
+# without anyone noticing.
+expected_in = "NOT IN (" + ", ".join(f"'{w}'" for w in gen.WARD_COMMUNITIES) + ")"
+check("named wards are matched exactly, not by substring",
+      (expected_in in sql, "LIKE '%ICU%'" in sql), (True, False))
+
+# An entry point is not a ward on its own. A&E is where admission to most wards
+# happens, but 217 of August's 1,147 A&E visits ended in discharge - casualty
+# attendances that belong on the 105. So the visit is excluded for having become
+# an admission, not for the department it passed through.
+unconditional = sql.split("NOT IN (", 1)[1].split(")", 1)[0]
+check("an entry point is not in the unconditional exclusion list",
+      [n for n in gen.ENTRY_POINT_COMMUNITIES if n in unconditional], [])
+check("an entry point is excluded only when the visit became an admission",
+      ("EXISTS (SELECT 1 FROM" in sql and "dbo.Admissions a" in sql
+       and "a.VisitNo = vv.VisitNo" in sql), True)
+# The EXISTS sits in a WHERE clause, which is legal; the same expression in a
+# GROUP BY list is Msg 144, and scripts/test_sql.py holds the line there.
+check("and the admission test is a WHERE clause, not a GROUP BY",
+      re.search(r"GROUP BY[^\n]*EXISTS", sql, re.I) is None, True)
+
+# OPD_VISIT_FILTER is an f-string evaluated at import whose VALUE the query
+# templates interpolate, so a {DATABASE} left inside it is never expanded by
+# anyone. It reaches the hospital as five literal characters and a syntax
+# error. Nothing else catches it, because the Python is perfectly valid.
+check("no placeholder survives into the generated SQL",
+      re.search(r"\{[A-Za-z_]+\}", sql), None)
+
+# The roll-call script carries the same list, and a list kept in two places is
+# a list that will disagree with itself. This is the only thing stopping the
+# extract excluding a ward the verification query still counts as a clinic.
+with open(os.path.join(HERE, "sql", "17_ward_communities.sql")) as f:
+    rollcall = f.read()
+check("the roll-call script names the same wards",
+      all(f"'{w}'" in rollcall for w in gen.WARD_COMMUNITIES), True)
+check("and looks for the same word",
+      f"like '%{gen.WARD_MARKER.lower()}%'" in rollcall.lower(), True)
+# Once per community, not once per visit. A scalar function in a WHERE clause
+# runs row by row, and fifteen thousand calls where thirty will do is the
+# difference between a query that returns and one that is killed.
+check("the lookup is resolved once per community",
+      sql.count("GetLookupDataDes"), 1)
+check("over the distinct communities of the period",
+      "SELECT  DISTINCT vv.CommunityID" in sql, True)
+# A visit with no community is kept: absence of a ward name is not evidence of
+# a ward, and dropping the unclassifiable loses attendances silently.
+check("a visit with no community is kept", "ISNULL(comm.name, '')" in sql, True)
 check("two grains: attendance rows and condition rows",
       sql.count("UNION ALL"), 1)
 check("attendance sentinel present", "'(attendance)'" in sql, True)
@@ -170,13 +237,10 @@ for os_key in ("windows", "linux"):
     check(f"{os_key}: emits all five columns",
           all(c in text for c in gen.strata_columns()), True)
 
-print()
-if failures:
-    print(f"{len(failures)} check(s) failed:\n")
-    for f in failures:
-        print("  - " + f)
-    sys.exit(1)
-print("All checks passed.")
+# The summary used to stand here, and everything below it - the whole 033B
+# surveillance section, added later - was printed but never counted. A check
+# there could fail in plain sight and the run still exit 0, which is how "no
+# neighbouring week leaks in" went unnoticed. The summary now closes the file.
 
 
 # ---------------------------------------------------------------------------
@@ -209,8 +273,13 @@ for os_key in ("macos", "linux"):
 print("\nThe week is ISO-8601 and is baked in")
 check("week 35 of 2026 starts Monday 24 August", "'2026-08-24'" in surv["linux"], True)
 check("and ends exclusive at 31 August", "'2026-08-31'" in surv["linux"], True)
+# Read from the SQL, not the whole script. Probing the file matched the
+# "Generated: <today>" line in its header the day today happened to be one of
+# the two probe dates - a test that fails once a year and passes the rest of
+# the time is worse than no test, because it teaches you to ignore it.
 check("no neighbouring week leaks in",
-      any(d in surv["linux"] for d in ("2026-08-17", "2026-09-07")), False)
+      any(d in gen.surv_sql(date(2026, 8, 24), date(2026, 8, 31))
+          for d in ("2026-08-17", "2026-09-07")), False)
 _, w01 = gen.generate("SURV", "2026W01", "linux", "Weekly", "033B")
 check("week 1 of 2026 begins in December 2025, per ISO-8601",
       "'2025-12-29'" in w01, True)
@@ -406,3 +475,13 @@ for os_key in gen.OS_CHOICES:
     n, t = gen.generate("OPD", "202607", os_key, "Monthly", "105:01")
     check(f"{os_key}: produces a file", (n.endswith(gen.OS_CHOICES[os_key]["ext"]),
                                          len(t) > 500), (True, True))
+
+
+
+print()
+if failures:
+    print(f"{len(failures)} check(s) failed:\n")
+    for f in failures:
+        print("  - " + f)
+    sys.exit(1)
+print("All checks passed.")
