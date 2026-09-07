@@ -323,8 +323,22 @@ check("only the clause before the first comma is classified",
 check("negatives are matched before positives",
       ssql.index("NON REACTIVE") < ssql.index("'%REACTIVE%'"), True)
 check("the controlled list's misspelling is accepted", "POSTIVE" in ssql, True)
-check("tested means resulted, which is what the form asks",
-      ssql.count("Verdict IS NOT NULL") >= 3, True)
+# Tested used to mean resulted, on the reasoning that a test never resulted was
+# not a test. Week 35 disproved it: 173 rapid tests were drawn and MA02
+# reported 0, because not one result had been typed in. A denominator of nought
+# does not understate the positivity, it makes it undefined - and the Ministry
+# asked how many clients were tested, not how many results were keyed.
+check("a specimen drawn is a test performed",
+      all(f"SELECT '{c}', COUNT(DISTINCT d.SpecimenNo)" in ssql
+          for c in ("MA02", "MA04")), True)
+check("...counted from the requests, over the week the specimen was drawn",
+      ssql.count("r.DrawnDateTime >=") >= 3, True)
+# Positives still come from results: a positive is a finding, and a specimen
+# with no result recorded has not found anything.
+check("but a positive still means a result that says so",
+      all(f"SELECT '{c}', COUNT(*) FROM #res" in ssql for c in ("MA03", "MA05")), True)
+check("and GeneXpert still counts what was resulted",
+      "Verdict IS NOT NULL" in ssql, True)
 check("the rejection code is the confirmed one", "'54N'" in ssql, True)
 
 print("\nReports without a script refuse, and say why")
@@ -485,3 +499,32 @@ if failures:
         print("  - " + f)
     sys.exit(1)
 print("All checks passed.")
+
+
+print("\nEP01b, Malaria Tested: a line no diagnosis can ever produce")
+# It has stood empty at Jinja for five years while EP01c beside it was filled -
+# a numerator reported with no denominator, which is why the recorded test
+# positivity has been between 27 and 82 per cent instead of a credible figure.
+strata = gen.opd_strata_sql(date(2026, 8, 1), date(2026, 9, 1))
+check("the extract emits it", gen.DIRECT_PREFIX + "EP01b" in strata, True)
+check("...marked as an HMIS code, not an ICD-11 stem",
+      strata.count(gen.DIRECT_PREFIX), 1)
+check("...from the laboratory requests", "dbo.LabRequestDetails" in strata, True)
+check("...joined to the visit, so it bands by age and sex like everything else",
+      "q.VisitNo = s.VisitNo" in strata, True)
+check("...for the rapid test and the slide",
+      all(c in strata for c in gen.MALARIA_TEST_CODES), True)
+# A client given both a slide and a rapid test was tested once. Counting the
+# tests would inflate the denominator and halve the positivity, which is the
+# very fault this line exists to expose.
+check("counted per client, not per test",
+      "COUNT(DISTINCT s.VisitNo)" in strata, True)
+# The ward rule applies to it as much as to a diagnosis: it reads from s.
+check("and only for outpatients", strata.count("FROM    s\nJOIN") >= 2, True)
+
+_comp = open(os.path.join(HERE, "..", "api", "_lib", "compiler.py")).read()
+check("the compiler takes a marked code as given",
+      "extract_scripts.DIRECT_PREFIX" in _comp, True)
+check("...rather than hunting it among ICD-11 stems, where it is not",
+      _comp.index("startswith(extract_scripts.DIRECT_PREFIX)")
+      < _comp.index('map_diagnosis(raw, code_index, source="icd11")'), True)

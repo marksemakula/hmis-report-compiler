@@ -12,6 +12,7 @@ import re
 from collections import defaultdict
 from datetime import date
 
+from . import extract_scripts
 from .diagnosis_map import map_diagnosis
 from .validators import mapping, ipd_diagnosis_index
 
@@ -158,7 +159,15 @@ def compile_opd_strata(rows: list, period: str):
         # acute pharyngitis (CA02) as prostate cancer (105-CA02). See
         # diagnosis_map.map_diagnosis for what that produced for July 2026.
         raw = str(r.get("diagnosis_code") or "").strip()
-        code = map_diagnosis(raw, code_index, source="icd11") if raw else ""
+        # A few 105:01 lines are not diagnoses and no translation can produce
+        # them. EP01b, Malaria Tested, counts laboratory work; the extract marks
+        # such a row so the code is taken as given rather than looked for among
+        # ICD-11 stems, where it would never be found and would land in All
+        # others.
+        if raw.startswith(extract_scripts.DIRECT_PREFIX):
+            code = raw[len(extract_scripts.DIRECT_PREFIX):].strip()
+        else:
+            code = map_diagnosis(raw, code_index, source="icd11") if raw else ""
         code = re.sub(r"\s+", "", code)
         de_id = code_index.get(code)
         if not de_id:

@@ -127,6 +127,26 @@ def _community_cte(start: date, end_exclusive: date) -> str:
 # The row that carries visit counts rather than a condition.
 ATTENDANCE_SENTINEL = "(attendance)"
 
+# A strata row whose diagnosis column already holds an HMIS 105 code rather
+# than an ICD-11 one.
+#
+# Almost every 105:01 line is a diagnosis, and the compiler translates
+# ClinicMaster's ICD-11 stems into HMIS codes. A few lines are not diagnoses at
+# all. EP01b, Malaria Tested, counts laboratory work: there is no diagnosis
+# that means "a blood slide was taken", so no translation can ever produce it,
+# and it has stood empty at Jinja for five years while EP01c beside it was
+# filled - a numerator reported with no denominator.
+#
+# The prefix marks such a row so the compiler takes the code as given. It is
+# parenthesised for the same reason as the attendance sentinel: no ICD-11 stem
+# and no HMIS code can contain a bracket, so the two namespaces cannot collide.
+DIRECT_PREFIX = "(hmis)"
+
+# Malaria testing, as ClinicMaster's laboratory records it. SNOMED CT codes,
+# the same two the 033B weekly tally counts for MA02 and MA04.
+MALARIA_TEST_CODES = ("407727009", "372071003")   # RDT, microscopy
+MALARIA_TESTS = ", ".join(f"'{c}'" for c in MALARIA_TEST_CODES)
+
 DATABASE = "ClinicMasterMOH"
 DEFAULT_SERVER = "172.20.0.230"
 
@@ -342,7 +362,28 @@ JOIN    {DATABASE}.dbo.Diagnosis d
     AND d.ObjectName  = 'Visits'
     AND d.VisitType   = 'Out Patient'
 WHERE   d.DiseaseCode IS NOT NULL
-GROUP BY d.DiseaseCode, s.band, s.sex, s.visit"""
+GROUP BY d.DiseaseCode, s.band, s.sex, s.visit
+
+UNION ALL
+
+/* EP01b, Malaria Tested (B/s & RDT). Not a diagnosis: laboratory work, which
+   is why translating conditions could never produce it and why it has been
+   empty for five years while EP01c beside it was filled.
+
+   Counted per CLIENT, not per test. A client given both a slide and a rapid
+   test was tested once; counting the tests would inflate the denominator and
+   halve the positivity, which is the very fault this line exists to expose.
+
+   A specimen drawn is a test performed. Whether its result was ever typed in
+   is a separate question, and answering it here would repeat the 033B error of
+   reporting 0 rapid tests in a week when 173 were taken. */
+SELECT  '{DIRECT_PREFIX}EP01b' AS diagnosis, s.band, s.sex, s.visit,
+        COUNT(DISTINCT s.VisitNo) AS n
+FROM    s
+JOIN    {DATABASE}.dbo.LabRequests q ON q.VisitNo = s.VisitNo
+JOIN    {DATABASE}.dbo.LabRequestDetails t ON t.SpecimenNo = q.SpecimenNo
+WHERE   t.TestCode IN ({MALARIA_TESTS})
+GROUP BY s.band, s.sex, s.visit"""
 
 
 def profile_sql() -> str:
@@ -437,8 +478,16 @@ def surv_sql(start, end_exclusive) -> str:
         'MTB DETECTED MEDIUM,RIF resistance NOT DETECTED' is a positive whose
         tail says otherwise. Negatives are matched before positives, because
         NON REACTIVE contains REACTIVE.
-      * MA02, MA04 and GP01 count tests RESULTED, which is what the form's
-        'Cases Tested' asks for. Counting orders reported 173 rapid tests in a
+      * MA02 and MA04 count tests PERFORMED, which is a specimen drawn.
+        They counted tests RESULTED until 7 September 2026, and week 35 shows
+        why that was wrong: 173 rapid tests were drawn and MA02 reported 0,
+        because no result had been typed in for any of them. A denominator of
+        nought against a positive count is not a quiet understatement, it makes
+        the positivity undefined. Whether a result was recorded is a real
+        question and check_consistency still asks it, comparing these against
+        the _req_ metadata rows; it is not the same question as how many
+        clients were tested.
+      * GP01 counts tests RESULTED, which is what the form's
         week where not one result was ever recorded.
 
     The _ rows are extract metadata; the compiler carries them for audit and
@@ -486,16 +535,24 @@ FROM   (SELECT ROW_NUMBER() OVER (PARTITION BY PatientNo
 WHERE  v.seq_in_period = 1;
 
 INSERT INTO #tally (Code, Value)
-SELECT 'MA02', COUNT(*) FROM #res
-WHERE  TestCode = '407727009' AND SubTestCode = '407727009' AND Verdict IS NOT NULL;
+SELECT 'MA02', COUNT(DISTINCT d.SpecimenNo)
+FROM   {DATABASE}.dbo.LabRequestDetails d
+JOIN   {DATABASE}.dbo.LabRequests r ON r.SpecimenNo = d.SpecimenNo
+WHERE  d.TestCode = '407727009'
+  AND  r.DrawnDateTime >= '{start.isoformat()}'
+  AND  r.DrawnDateTime <  '{end_exclusive.isoformat()}';
 
 INSERT INTO #tally (Code, Value)
 SELECT 'MA03', COUNT(*) FROM #res
 WHERE  TestCode = '407727009' AND SubTestCode = '407727009' AND Verdict = 'Positive';
 
 INSERT INTO #tally (Code, Value)
-SELECT 'MA04', COUNT(*) FROM #res
-WHERE  TestCode = '372071003' AND SubTestCode = '01' AND Verdict IS NOT NULL;
+SELECT 'MA04', COUNT(DISTINCT d.SpecimenNo)
+FROM   {DATABASE}.dbo.LabRequestDetails d
+JOIN   {DATABASE}.dbo.LabRequests r ON r.SpecimenNo = d.SpecimenNo
+WHERE  d.TestCode = '372071003'
+  AND  r.DrawnDateTime >= '{start.isoformat()}'
+  AND  r.DrawnDateTime <  '{end_exclusive.isoformat()}';
 
 INSERT INTO #tally (Code, Value)
 SELECT 'MA05', COUNT(*) FROM #res

@@ -132,9 +132,19 @@ def check_consistency(clean_rows: list, context: dict = None) -> list:
             out.append({"severity": "warning",
                         "message": f"{a} equals {b} at {got[b]}: {why}."})
 
-    # Ordered against resulted, where the extract recorded both. A test ordered
-    # and never resulted was not a test, and reporting it as one overstates the
-    # denominator and halves the positivity.
+    # Ordered against reported, where the extract recorded both.
+    #
+    # This read "a test ordered and never resulted was not a test", and MA02 and
+    # MA04 were counted from results on that reasoning. Week 35 disproved it:
+    # 173 rapid tests were drawn and MA02 reported 0, because not one result had
+    # been typed in. A denominator of nought does not understate positivity, it
+    # makes it undefined, and the Ministry asked how many clients were tested,
+    # not how many results were keyed.
+    #
+    # A specimen drawn is a test performed, so that is what those lines now
+    # count. The gap between drawn and resulted is a real finding and is still
+    # reported here - it is simply a different question, and one for the
+    # laboratory rather than the denominator.
     for code, meta, what in (("MA02", "_req_rdt", "rapid tests"),
                              ("MA04", "_req_smear", "smears"),
                              ("GP01", "_req_xpert", "GeneXpert samples")):
@@ -145,8 +155,9 @@ def check_consistency(clean_rows: list, context: dict = None) -> list:
         if ordered > got[code]:
             gap = ordered - got[code]
             sev = "warning" if got[code] else "error"
-            tail = ("none was resulted, so nothing can be reported for this week"
-                    if not got[code] else f"{gap} were ordered but never resulted")
+            tail = ("none was resulted, so the laboratory has no record of what "
+                    "any of them found"
+                    if not got[code] else f"{gap} were drawn but never resulted")
             out.append({"severity": sev,
                         "message": f"{ordered} {what} ordered, {got[code]} resulted: {tail}."})
     return out
