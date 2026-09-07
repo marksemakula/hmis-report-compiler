@@ -61,6 +61,77 @@ CONSTANTS = {
     # their disaggregation to this, and the form draws twenty boxes for each of
     # them rather than ten. Writing the ten-box combo instead is invisible, not
     # an error - see the note in _fetch_data_elements.
+    # Diabetes is reported by TYPE as well, so the form draws sixty boxes for
+    # EM01: five age bands, three types, two sexes, new and known. The type
+    # comes from the ICD-11 code the register already carries - 5A10 is type 1,
+    # 5A11 is type 2, and everything else diabetic is Other Forms - so nothing
+    # extra has to be collected to fill it.
+    "OPD_DIABETES_TYPE": {
+      "id": "k4KRlwEEYCK",
+      "name": "Diabetes_Type_New_Known",
+      "cocs": {
+        "Known, 0-28Dys, Other Forms, Female": "rPm7S0XR6y5",
+        "Known, 0-28Dys, Other Forms, Male": "yLZc30LWI7w",
+        "Known, 0-28Dys, Type 1, Female": "xiPkaXwl9ms",
+        "Known, 0-28Dys, Type 1, Male": "o4fk3rHHseQ",
+        "Known, 0-28Dys, Type 2, Female": "lIpLLko3oYh",
+        "Known, 0-28Dys, Type 2, Male": "CUIwMsXbjaQ",
+        "Known, 10-19Yrs, Other Forms, Female": "rHgz2LSVGK9",
+        "Known, 10-19Yrs, Other Forms, Male": "mnSvbYexyx4",
+        "Known, 10-19Yrs, Type 1, Female": "oaz5VQX2pZQ",
+        "Known, 10-19Yrs, Type 1, Male": "Dm8dwa1hHkc",
+        "Known, 10-19Yrs, Type 2, Female": "kPR68Nlpyit",
+        "Known, 10-19Yrs, Type 2, Male": "iF7zy9VJ1Aq",
+        "Known, 20+Yrs, Other Forms, Female": "Ld51G0dzsjd",
+        "Known, 20+Yrs, Other Forms, Male": "rWWzr6gb5NA",
+        "Known, 20+Yrs, Type 1, Female": "VmhkTWk4Is6",
+        "Known, 20+Yrs, Type 1, Male": "mobl8rGVSY8",
+        "Known, 20+Yrs, Type 2, Female": "RtPVWq2YFJE",
+        "Known, 20+Yrs, Type 2, Male": "WyeQ6J6bXAn",
+        "Known, 29Dys-4Yrs, Other Forms, Female": "aJocuQ3ooR0",
+        "Known, 29Dys-4Yrs, Other Forms, Male": "fNrWbvglBZl",
+        "Known, 29Dys-4Yrs, Type 1, Female": "NpxZsPKqz0j",
+        "Known, 29Dys-4Yrs, Type 1, Male": "s2cbiJ3pwIp",
+        "Known, 29Dys-4Yrs, Type 2, Female": "vAE8T78HzS4",
+        "Known, 29Dys-4Yrs, Type 2, Male": "P8I8GM4Qq1o",
+        "Known, 5-9Yrs, Other Forms, Female": "QFWm8lEHf51",
+        "Known, 5-9Yrs, Other Forms, Male": "gOnaCOYx8FU",
+        "Known, 5-9Yrs, Type 1, Female": "HEPVxich0tL",
+        "Known, 5-9Yrs, Type 1, Male": "pPvOfV50SS8",
+        "Known, 5-9Yrs, Type 2, Female": "gmPQKX476R7",
+        "Known, 5-9Yrs, Type 2, Male": "SKxBAYeZfhQ",
+        "New, 0-28Dys, Other Forms, Female": "jigBnz63OTq",
+        "New, 0-28Dys, Other Forms, Male": "aYOggKgf2qf",
+        "New, 0-28Dys, Type 1, Female": "nAZQLi9ChTO",
+        "New, 0-28Dys, Type 1, Male": "CAYeUFk6h2C",
+        "New, 0-28Dys, Type 2, Female": "MHhAUffOozk",
+        "New, 0-28Dys, Type 2, Male": "oE6bFATemdI",
+        "New, 10-19Yrs, Other Forms, Female": "DgTKaqKQsMK",
+        "New, 10-19Yrs, Other Forms, Male": "mDmgfeOsFP1",
+        "New, 10-19Yrs, Type 1, Female": "b3iP3N7B43A",
+        "New, 10-19Yrs, Type 1, Male": "y6goT3JcMAq",
+        "New, 10-19Yrs, Type 2, Female": "Pb7kTaZspjK",
+        "New, 10-19Yrs, Type 2, Male": "hLGAYD8AJv6",
+        "New, 20+Yrs, Other Forms, Female": "flSniuHFXqT",
+        "New, 20+Yrs, Other Forms, Male": "KzDMJdBpwQR",
+        "New, 20+Yrs, Type 1, Female": "GukNWCaMyrP",
+        "New, 20+Yrs, Type 1, Male": "lg2mFPlfTeG",
+        "New, 20+Yrs, Type 2, Female": "LNk8BeoP08l",
+        "New, 20+Yrs, Type 2, Male": "MAiV2DxBxGn",
+        "New, 29Dys-4Yrs, Other Forms, Female": "OAG9CWUMahe",
+        "New, 29Dys-4Yrs, Other Forms, Male": "OSvXVZYVJbV",
+        "New, 29Dys-4Yrs, Type 1, Female": "Kd643OnOxjv",
+        "New, 29Dys-4Yrs, Type 1, Male": "NU7k532q8MD",
+        "New, 29Dys-4Yrs, Type 2, Female": "r66wwmHMTrj",
+        "New, 29Dys-4Yrs, Type 2, Male": "V1M6lik0C2W",
+        "New, 5-9Yrs, Other Forms, Female": "U7uWw9S9uAc",
+        "New, 5-9Yrs, Other Forms, Male": "KpwNTwpV2o6",
+        "New, 5-9Yrs, Type 1, Female": "mD3cFhm1D2B",
+        "New, 5-9Yrs, Type 1, Male": "XupciJhZFGQ",
+        "New, 5-9Yrs, Type 2, Female": "G2Qg9jeXaiJ",
+        "New, 5-9Yrs, Type 2, Male": "ZicGh3OOtlU",
+      }
+    },
     "OPD_NEW_KNOWN_AGE_SEX": {
       "id": "jCmOKzytYcd",
       "name": "New_Known_OPD Age(0-28 days)&Sex",
@@ -119,6 +190,24 @@ CONSTANTS = {
         "DEFAULT": {"id": "bjDvmb4bfuf", "name": "default", "cocs": {"default": "HllvX50cXC0"}},
     },
 }
+
+# The shape of a cached element listing, so a snapshot taken by an older reader
+# is refetched rather than trusted.
+#
+# This is not housekeeping. On 7 September 2026 the reader was corrected to take
+# the data set's category-combination override, which is what puts sickle cell,
+# hypertension, asthma, COPD and epilepsy in the boxes the form actually draws.
+# The correction deployed and changed nothing, because both caches - a committed
+# dhis2_mapping.json and the metadata_cache table - still held combos recorded
+# by the old reader, and both are read before any fetch. A fix nobody can see is
+# indistinguishable from no fix at all.
+#
+# Raise this whenever a change alters what _fetch_data_elements records, and
+# every deployment refetches once, by itself.
+#
+#   1  the element's own category combination
+#   2  the data set's override, where it declares one
+MAPPING_SCHEMA = 2
 
 _MAPPING = None
 
@@ -233,6 +322,20 @@ def _load_from_db():
             return row["value"] if row else None
 
 
+def _of_current_schema(blob):
+    """The element listing inside a cached snapshot, or None if it is stale.
+
+    A snapshot with no stamp was written before the override was read, so its
+    combinations are the elements' own. Returning None sends the caller to a
+    live fetch, which is the whole point: the alternative is a correct reader
+    serving figures a superseded one recorded."""
+    if not isinstance(blob, dict):
+        return None
+    if blob.get("_schema") != MAPPING_SCHEMA:
+        return None
+    return blob.get("dataElements") or None
+
+
 def _save_to_db(value):
     from . import db
     with db.get_conn() as conn:
@@ -240,7 +343,7 @@ def _save_to_db(value):
             cur.execute(
                 """INSERT INTO metadata_cache (key, value) VALUES ('data_elements', %s)
                    ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()""",
-                (json.dumps(value),),
+                (json.dumps({"_schema": MAPPING_SCHEMA, "dataElements": value}),),
             )
 
 
@@ -255,11 +358,11 @@ def mapping(force_refresh: bool = False):
     local = os.path.join(os.path.dirname(__file__), "dhis2_mapping.json")
     if not force_refresh and os.path.exists(local):
         with open(local) as f:
-            des = json.load(f)["dataElements"]
+            des = _of_current_schema(json.load(f))
     # 2. database cache
     if des is None and not force_refresh:
         try:
-            des = _load_from_db()
+            des = _of_current_schema(_load_from_db())
         except Exception:
             des = None
     # 3. live fetch

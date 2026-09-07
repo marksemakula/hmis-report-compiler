@@ -467,3 +467,42 @@ check("...taking new or known from the visit, as the attendance lines do",
 # accepted one in the wrong box is lost.
 check("and refuses a disaggregation it has no boxes for",
       'non-standard disaggregation' in _comp, True)
+
+
+print("\n-- a cache written by an older reader is not trusted --")
+# The override fix deployed and changed nothing. Both caches - a committed
+# dhis2_mapping.json and the metadata_cache table - still held combinations
+# recorded by the old reader, and both are read before any fetch. A fix nobody
+# can see is indistinguishable from no fix at all.
+from _lib import metadata as _md                                    # noqa: E402
+
+check("the element listing carries a schema stamp", _md.MAPPING_SCHEMA >= 2, True)
+check("an unstamped snapshot is refetched",
+      _md._of_current_schema({"dataElements": {"a": 1}}), None)
+check("...as is one stamped by an older reader",
+      _md._of_current_schema({"_schema": 1, "dataElements": {"a": 1}}), None)
+check("a current one is used", _md._of_current_schema(
+      {"_schema": _md.MAPPING_SCHEMA, "dataElements": {"a": 1}}), {"a": 1})
+check("and the stamp is written with what is cached",
+      '"_schema": MAPPING_SCHEMA' in _meta, True)
+
+print("\n-- diabetes is reported by type, from the code already recorded --")
+_dm = _C["categoryCombos"].get("OPD_DIABETES_TYPE", {})
+check("the sixty boxes the form draws for EM01", len(_dm.get("cocs", {})), 60)
+check("...all distinct", len(set(_dm.get("cocs", {}).values())), 60)
+_want_dm = {f"{s}, {b}, {t}, {x}"
+            for s in ("New", "Known") for b in _bands
+            for t in ("Type 1", "Type 2", "Other Forms") for x in ("Male", "Female")}
+check("...covering every state, band, type and sex",
+      _want_dm - set(_dm.get("cocs", {})), set())
+from _lib.compiler import diabetes_type                             # noqa: E402
+check("5A10 is type 1", diabetes_type("5A10"), "Type 1")
+check("5A11 is type 2, sub-codes included",
+      (diabetes_type("5A11"), diabetes_type("5A11.0")), ("Type 2", "Type 2"))
+# Malnutrition-related, gestational, drug-induced and unspecified diabetes all
+# belong in Other Forms, and so does anything else that reached EM01.
+check("everything else diabetic is Other Forms",
+      {diabetes_type(c) for c in ("5A12", "5A13.4", "5A14", "JA63", "E14", "")},
+      {"Other Forms"})
+check("the compiler routes EM01 through it",
+      'OPD_DIABETES_TYPE' in _comp, True)

@@ -76,6 +76,21 @@ def _all_others(code_index):
     return None
 
 
+# Which diabetes the register recorded, read from the ICD-11 code it already
+# carries. 5A10 is type 1 and 5A11 is type 2; malnutrition-related, gestational,
+# drug-induced and unspecified diabetes are all Other Forms on the form, which
+# is where anything else diabetic belongs.
+#
+# Deriving it costs nothing and collecting it would cost a form change, so EM01
+# is disaggregable today rather than after the next revision of the register.
+DIABETES_TYPE_STEMS = {"5A10": "Type 1", "5A11": "Type 2"}
+
+
+def diabetes_type(raw: str) -> str:
+    stem = re.split(r"[.\s]", str(raw or "").strip().upper(), maxsplit=1)[0]
+    return DIABETES_TYPE_STEMS.get(stem, "Other Forms")
+
+
 def compile_opd(rows: list, period: str):
     m = mapping()
     code_index = m["HMIS105_01_codeIndex"]
@@ -204,6 +219,15 @@ def compile_opd_strata(rows: list, period: str):
                 counts[(de_id, nk_coc)] += weight
             else:
                 unmapped[f"{raw} ({state}, {coc_name} is not a box on the form)"] += weight
+        elif cc == m["categoryCombos"]["OPD_DIABETES_TYPE"]["id"]:
+            # Sixty boxes, not ten: age, type, sex, and new against known.
+            state = "New" if r["visit_type"] == "New" else "Known"
+            key = f"{state}, {r['age_band']}, {diabetes_type(raw)}, {r['sex']}"
+            dm_coc = _coc("OPD_DIABETES_TYPE", key)
+            if dm_coc:
+                counts[(de_id, dm_coc)] += weight
+            else:
+                unmapped[f"{raw} ({key} is not a box on the form)"] += weight
         elif cc == m["categoryCombos"]["DEFAULT"]["id"]:
             counts[(de_id, _coc("DEFAULT", "default"))] += weight
         else:
