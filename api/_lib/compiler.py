@@ -179,9 +179,30 @@ def compile_opd_strata(rows: list, period: str):
         cc = des[de_id]["categoryCombo"]
         if cc == m["categoryCombos"]["OPD_AGE_SEX"]["id"]:
             counts[(de_id, att_coc)] += weight
+        elif cc == m["categoryCombos"]["OPD_NEW_KNOWN_AGE_SEX"]["id"]:
+            # Sickle cell, hypertension, asthma, COPD and epilepsy are reported
+            # by new versus known case as well as by age and sex, so the form
+            # draws twenty boxes for each rather than ten. The strata already
+            # carry the distinction - it is what separates OA01 from OA02 - and
+            # it was simply being thrown away for conditions.
+            #
+            # "Known" is the Ministry's word for what the attendance lines call
+            # a re-attendance: a client already on the register for this
+            # condition. Same fact, two vocabularies, and the form uses this one.
+            state = "New" if r["visit_type"] == "New" else "Known"
+            nk_coc = _coc("OPD_NEW_KNOWN_AGE_SEX", f"{state}, {coc_name}")
+            if nk_coc:
+                counts[(de_id, nk_coc)] += weight
+            else:
+                unmapped[f"{raw} ({state}, {coc_name} is not a box on the form)"] += weight
         elif cc == m["categoryCombos"]["DEFAULT"]["id"]:
             counts[(de_id, _coc("DEFAULT", "default"))] += weight
         else:
+            # Cancers and diabetes carry disaggregations of their own that this
+            # compiler holds no option combos for. Refusing them puts them in
+            # the review list, where a person sees them; writing them to the
+            # age-and-sex combo anyway would put them where DHIS2 accepts them
+            # and nobody can ever read them.
             unmapped[raw + " (non-standard disaggregation)"] += weight
 
     return _to_values(counts, "HMIS105_01"), _unmapped_list(unmapped)

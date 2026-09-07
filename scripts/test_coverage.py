@@ -414,3 +414,56 @@ check("...and are counted", lost["verification"]["missingCount"], 11)
 check("...and named as absent from the server",
       "11 of the 11 values are not on the server" in lost["description"], True)
 check("...with the rows carried for display", len(lost["verification"]["missing"]), 10)
+
+
+# ---------------------------------------------------------------------------
+# The category-combination override, found 7 September 2026.
+#
+# August 2026 was submitted and accepted, and the form showed nothing against
+# Sickle Cell Disease. The values were in DHIS2 the whole time - 370 of them -
+# sitting on category option combos the form has no field for.
+#
+# A data set may override the disaggregation a data element is reported under,
+# and 105:01 overrides seventeen of its 623. Sickle cell, hypertension, asthma,
+# COPD and epilepsy are reported by NEW versus KNOWN case as well as by age and
+# sex, so the form draws twenty boxes for each of them. The compiler read the
+# element's own combination, wrote the ten age-and-sex boxes, and DHIS2 accepted
+# every one: they are valid combos of that combination. 2,110 values for August
+# went somewhere nobody can open.
+#
+# It is the same failure as reporting into a retired element, one level down.
+print("\n-- the disaggregation the FORM uses, not the element's own --")
+from _lib.metadata import CONSTANTS as _C                            # noqa: E402
+
+_nk = _C["categoryCombos"].get("OPD_NEW_KNOWN_AGE_SEX", {})
+check("the new-versus-known combination is known to the compiler",
+      bool(_nk.get("id")), True)
+check("...with all twenty of the boxes the form draws",
+      len(_nk.get("cocs", {})), 20)
+# Both halves of every age and sex cell, so no row can fall between them.
+_bands = ["0-28Dys", "29Dys-4Yrs", "5-9Yrs", "10-19Yrs", "20+Yrs"]
+_want = {f"{s}, {b}, {x}" for s in ("New", "Known") for b in _bands
+         for x in ("Male", "Female")}
+check("...covering every state, band and sex",
+      _want - set(_nk.get("cocs", {})), set())
+check("...and no option combo used twice",
+      len(set(_nk.get("cocs", {}).values())), 20)
+
+_meta = open(os.path.join(HERE, "..", "api", "_lib", "metadata.py")).read()
+check("the fetch asks the data set for its own combination",
+      "dataSetElements[categoryCombo[id]" in _meta, True)
+check("...and the override wins over the element's",
+      'e.get("categoryCombo") or de["categoryCombo"]' in _meta, True)
+check("...while the element's own is kept, so the difference is visible",
+      '"elementCategoryCombo"' in _meta, True)
+
+_comp = open(os.path.join(HERE, "..", "api", "_lib", "compiler.py")).read()
+check("the compiler writes the new-versus-known boxes",
+      'OPD_NEW_KNOWN_AGE_SEX' in _comp, True)
+check("...taking new or known from the visit, as the attendance lines do",
+      'state = "New" if r["visit_type"] == "New" else "Known"' in _comp, True)
+# Cancers and diabetes carry their own disaggregations that we hold no option
+# combos for. Refusing them is the point: a refused value is reviewed, an
+# accepted one in the wrong box is lost.
+check("and refuses a disaggregation it has no boxes for",
+      'non-standard disaggregation' in _comp, True)

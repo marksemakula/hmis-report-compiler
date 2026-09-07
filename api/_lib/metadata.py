@@ -56,6 +56,37 @@ CONSTANTS = {
         "CI05_avgLengthOfStay": "dfaUCTHQIo8",
     },
     "categoryCombos": {
+    # The chronic conditions the Ministry wants split by new versus known case:
+    # sickle cell, hypertension, asthma, COPD and epilepsy. 105:01 overrides
+    # their disaggregation to this, and the form draws twenty boxes for each of
+    # them rather than ten. Writing the ten-box combo instead is invisible, not
+    # an error - see the note in _fetch_data_elements.
+    "OPD_NEW_KNOWN_AGE_SEX": {
+      "id": "jCmOKzytYcd",
+      "name": "New_Known_OPD Age(0-28 days)&Sex",
+      "cocs": {
+        "New, 0-28Dys, Male": "vgwBZ1EnvS1",
+        "New, 0-28Dys, Female": "lKtUo70yy5S",
+        "New, 29Dys-4Yrs, Male": "ubHnOQDfKvn",
+        "New, 29Dys-4Yrs, Female": "kieAJGAdQQz",
+        "New, 5-9Yrs, Male": "Uu9EzmgMiUx",
+        "New, 5-9Yrs, Female": "NBLm9T4PdXT",
+        "New, 10-19Yrs, Male": "vv7DH53AEaT",
+        "New, 10-19Yrs, Female": "De2rXs4jApk",
+        "New, 20+Yrs, Male": "BVbGW2Vr7UU",
+        "New, 20+Yrs, Female": "bMRP4hxhZ1i",
+        "Known, 0-28Dys, Male": "Io3bQxY6Nr3",
+        "Known, 0-28Dys, Female": "aUatqtCxzVw",
+        "Known, 29Dys-4Yrs, Male": "OGomkW4FRgT",
+        "Known, 29Dys-4Yrs, Female": "MM1oF4N8Vku",
+        "Known, 5-9Yrs, Male": "xBLq8rFuTSS",
+        "Known, 5-9Yrs, Female": "G4cHMKNJ898",
+        "Known, 10-19Yrs, Male": "keJQ8icaJd5",
+        "Known, 10-19Yrs, Female": "nq6KPmpdIMQ",
+        "Known, 20+Yrs, Male": "gnq6kfPFRUy",
+        "Known, 20+Yrs, Female": "lUs3TRrwSp3"
+      }
+    },
         "OPD_AGE_SEX": {"id": "esaNB4G5AHs", "name": "OPD Age(0-28days+) & Sex", "cocs": {
             "0-28Dys, Male": "zh2zAaHyYQx", "0-28Dys, Female": "wDiX34aiw6i",
             "29Dys-4Yrs, Male": "V2OuNTRI6ua", "29Dys-4Yrs, Female": "huBy3W5qiD2",
@@ -130,8 +161,13 @@ def _fetch_data_elements(only=None):
             continue
         r = s.get(
             f"{base}/api/dataSets/{ds['id']}.json",
-            params={"fields": "id,name,dataSetElements[dataElement[id,name,code,"
-                              "valueType,zeroIsSignificant,categoryCombo[id]]]"},
+            # The data set's OWN categoryCombo for an element, asked for
+            # alongside the element's. A data set may override the
+            # disaggregation an element is reported under, and the form renders
+            # the override. See the note on `categoryCombo` below.
+            params={"fields": "id,name,dataSetElements[categoryCombo[id],"
+                              "dataElement[id,name,code,valueType,"
+                              "zeroIsSignificant,categoryCombo[id]]]"},
             timeout=60,
         )
         r.raise_for_status()
@@ -158,7 +194,24 @@ def _fetch_data_elements(only=None):
                 # only the name-borne one is the Ministry's HMIS code.
                 "code": m.group(2) if m else None,
                 "dhis2Code": de.get("code"),
-                "categoryCombo": de["categoryCombo"]["id"],
+                # THE DISAGGREGATION THE FORM ACTUALLY USES, which is not
+                # always the element's own.
+                #
+                # A data set may override an element's category combination,
+                # and 105:01 overrides seventeen of its 623. Reading only the
+                # element's combo, as this did, sent August 2026's sickle cell,
+                # hypertension, diabetes, epilepsy, asthma and COPD - 2,110
+                # values - to category option combos the form has no field for.
+                # DHIS2 accepted every one of them, because they are valid
+                # combos of the element's own combination; they simply cannot
+                # be seen, checked or corrected by anyone opening the form.
+                #
+                # The override wins, and where we hold no option combos for it
+                # the compiler refuses the element rather than writing it
+                # somewhere invisible.
+                "categoryCombo": ((e.get("categoryCombo") or de["categoryCombo"])["id"]),
+                # Kept so the difference is visible rather than inferred.
+                "elementCategoryCombo": de["categoryCombo"]["id"],
                 "valueType": de.get("valueType"),
                 # False on 3,247 of 3,252 elements, which is why zeros are
                 # rendered by us and never pushed. See coverage.py.
