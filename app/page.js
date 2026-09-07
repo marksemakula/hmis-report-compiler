@@ -12,6 +12,7 @@ import Mortality from './mortality';
 import PerinatalDeaths from './perinataldeaths';
 import TbScreening from './tbscreening';
 import useWidth from './usewidth';
+import { apiFailure } from './lib';
 
 /* ---------------------------------------------------------------- periods */
 
@@ -618,7 +619,7 @@ export default function Dashboard() {
         ...w,
         [scope]: {
           loading: false,
-          error: body?.detail || `DHIS2 did not answer (HTTP ${r.status}).`,
+          error: apiFailure('/api/py/overview', r.status, body, 'The wider figures'),
         },
       }));
       return;

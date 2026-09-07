@@ -1,6 +1,7 @@
 'use client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import useWidth from './usewidth';
+import { apiFailure } from './lib';
 
 /* District choropleth for the region.
  *
@@ -211,12 +212,12 @@ export default function DistrictMap({ homeDistrictOnly = false }) {
         const [g, c] = await Promise.all([
           fetch('/api/py/map/geometry').then(async (r) => {
             const b = await r.json().catch(() => null);
-            if (!r.ok) throw new Error(b?.detail || `Outlines unavailable (HTTP ${r.status}).`);
+            if (!r.ok) throw new Error(apiFailure('/api/py/map/geometry', r.status, b, 'The district outlines'));
             return b;
           }),
           fetch('/api/py/map/indicators').then(async (r) => {
             const b = await r.json().catch(() => null);
-            if (!r.ok) throw new Error(b?.detail || `Indicator list unavailable (HTTP ${r.status}).`);
+            if (!r.ok) throw new Error(apiFailure('/api/py/map/indicators', r.status, b, 'The indicator list'));
             return b;
           }),
         ]);
@@ -260,7 +261,7 @@ export default function DistrictMap({ homeDistrictOnly = false }) {
       const r = await fetch(
         `/api/py/map/values?indicator=${encodeURIComponent(indicator)}&period=${encodeURIComponent(period)}`);
       const b = await r.json().catch(() => null);
-      if (!r.ok) throw new Error(b?.detail || `District figures unavailable (HTTP ${r.status}).`);
+      if (!r.ok) throw new Error(apiFailure('/api/py/map/values', r.status, b, 'The district figures'));
       setValues(b);
     } catch (e) {
       setValues(null);
