@@ -165,3 +165,11 @@ export const IconInbox = (p) => (
     <path d="M4 13h3l3 3h4l3 -3h3" />
   </Icon>
 );
+
+export const IconClipboardCheck = (p) => (
+  <Icon {...p}>
+    <path d="M9 5h-2a2 2 0 0 0 -2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-12a2 2 0 0 0 -2 -2h-2" />
+    <path d="M9 5a2 2 0 0 1 2 -2h2a2 2 0 0 1 2 2a2 2 0 0 1 -2 2h-2a2 2 0 0 1 -2 -2z" />
+    <path d="M9 14l2 2l4 -4" />
+  </Icon>
+);

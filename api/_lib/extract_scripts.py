@@ -229,6 +229,15 @@ UTILITIES = {
                 "Reference data only - no patient row is read.",
         "output": "JRRH_clinicmaster_profile.csv",
     },
+    "hivcare": {
+        "label": "HIV care schema (audit tools)",
+        "note": "The ART, PMTCT and EID tables, their columns and row counts, "
+                "the lookup function's definition and the HIV laboratory test "
+                "codes - what the Adult, PMTCT and EID audit extracts must be "
+                "written against. Catalogue and code lists only - no patient row "
+                "is read.",
+        "output": "JRRH_clinicmaster_hivcare_schema.csv",
+    },
     "diseases": {
         "label": "Disease dictionary",
         "note": "The complete Diseases table, needed to map ClinicMaster "
@@ -696,6 +705,86 @@ DROP TABLE #res;
 """.strip()
 
 
+# Name fragments of the tables an HIV clinic keeps. Deliberately broad: the
+# point of the script is to find tables nobody has named to us yet, and a
+# false positive costs one line in a catalogue listing, where a miss costs
+# another round trip to the hospital.
+HIV_TABLE_PATTERNS = (
+    "ART%", "%ART", "%ARV%", "%HIV%", "%Viral%", "%PMTCT%", "%EID%", "%Exposed%",
+    "%Infant%", "%ANC%", "%Antenatal%", "%Maternity%", "%Deliver%", "%Regimen%",
+    "%TPT%", "%TB%", "%Cervical%", "%Cancer%", "%IAC%", "%Adherence%", "%DSDM%",
+    "%Differentiated%", "%Appointment%", "%Index%", "%Partner%", "%Contact%",
+    "%OVC%", "%Resistan%", "%PCR%", "%Prophylax%", "%Cotrim%", "%CHW%", "%VHT%",
+    "%Peer%", "%Lookup%",
+)
+# Column-name fragments that betray HIV data in a table whose name does not.
+HIV_COLUMN_PATTERNS = (
+    "%ARTNo%", "%ART_No%", "%ARTNumber%", "%Regimen%", "%ViralLoad%", "%EID%",
+    "%PMTCT%", "%NextAppointment%", "%AppointmentDate%", "%ReturnDate%",
+    "%DSDM%", "%TPT%", "%WHOStage%", "%HIVStatus%", "%Breastfeed%", "%Pregnan%",
+)
+HIV_TEST_PATTERNS = ("%viral%", "%VL%", "%PCR%", "%DNA%", "%HIV%", "%CD4%",
+                     "%CrAg%", "%TB LAM%", "%GeneXpert%", "%Xpert%")
+
+
+def hivcare_sql() -> str:
+    """Describe the HIV clinic's tables, not its patients.
+
+    The Adult ART, PMTCT and EID audit tools need an extract per client, and
+    none of the tables behind them have been confirmed. The rule this module
+    has learned the hard way (see NOT_SCRIPTABLE) is that a query written
+    against guessed column names fails, so the first step is this catalogue:
+
+      1  tables whose names look like HIV care, with every column and a count
+      2  columns elsewhere whose names do
+      3  the definition of dbo.GetLookupDataDes, which decodes every coded list
+         (sex, regimen, status) and so tells us where the code lists live
+      4  laboratory test codes and names for viral load, PCR and CD4, with how
+         often each has been requested
+
+    Everything returned is schema or a code list. No name, number, date of
+    birth or result is read."""
+    like = lambda col, pats: " OR ".join(f"{col} LIKE '{p}'" for p in pats)
+    return f"""SELECT '1_tables' AS section, t.name AS a,
+       CAST(STUFF((SELECT ', ' + c.name + ' [' + ty.name + ']'
+                   FROM {DATABASE}.sys.columns c
+                   JOIN {DATABASE}.sys.types ty ON ty.user_type_id = c.user_type_id
+                   WHERE c.object_id = t.object_id
+                   ORDER BY c.column_id
+                   FOR XML PATH(''), TYPE).value('.', 'nvarchar(max)'), 1, 2, '')
+            AS nvarchar(4000)) AS b,
+       CAST(ISNULL((SELECT SUM(pt.rows) FROM {DATABASE}.sys.partitions pt
+                    WHERE pt.object_id = t.object_id AND pt.index_id IN (0,1)), 0)
+            AS varchar(20)) AS c
+FROM {DATABASE}.sys.tables t
+WHERE {like('t.name', HIV_TABLE_PATTERNS)}
+
+UNION ALL
+SELECT '2_columns_elsewhere', t.name,
+       CAST(c.name + ' [' + ty.name + ']' AS nvarchar(4000)), ''
+FROM {DATABASE}.sys.columns c
+JOIN {DATABASE}.sys.tables t ON t.object_id = c.object_id
+JOIN {DATABASE}.sys.types ty ON ty.user_type_id = c.user_type_id
+WHERE ({like('c.name', HIV_COLUMN_PATTERNS)})
+  AND NOT ({like('t.name', HIV_TABLE_PATTERNS)})
+
+UNION ALL
+SELECT '3_lookup_function', o.name,
+       CAST(LEFT(OBJECT_DEFINITION(o.object_id), 3900) AS nvarchar(4000)), ''
+FROM {DATABASE}.sys.objects o
+WHERE o.name IN ('GetLookupDataDes', 'GetLookupData', 'GetLookupDataID')
+
+UNION ALL
+SELECT '4_lab_tests', d.TestCode,
+       CAST(MAX(d.TestName) AS nvarchar(4000)),
+       CAST(COUNT(*) AS varchar(20))
+FROM {DATABASE}.dbo.INTLabRequestDetails d
+WHERE {like('d.TestName', HIV_TEST_PATTERNS)}
+GROUP BY d.TestCode
+
+ORDER BY section, a"""
+
+
 def diseases_sql() -> str:
     """The complete disease dictionary. Reference data, not patient data -
     it is the key to mapping ClinicMaster conditions onto HMIS 105 elements,
@@ -1128,8 +1217,19 @@ def generate(report_type: str, period: str, os_key: str, period_type: str,
             "label": u["label"], "note": u["note"], "generated": date.today().isoformat(),
             "server": server, "database": DATABASE, "output": u["output"],
             "script": name,
-            "sql": profile_sql() if kind == "profile" else diseases_sql(),
+            "sql": {"profile": profile_sql, "hivcare": hivcare_sql,
+                    "diseases": diseases_sql}[kind](),
         }
+        if os_key == "sql":
+            # The SQL-only choice is for machines with no interpreter, so it
+            # must be SQL. It used to fall through to the Python template and
+            # hand over a .sql file full of Python.
+            return name, (f"/* JRRH ClinicMaster - {u['label']}\n"
+                          f"   Generated {common['generated']}. Read-only.\n\n"
+                          f"   {u['note']}\n\n"
+                          f"   Run in Azure Data Studio against {DATABASE}, then save the\n"
+                          f"   grid as CSV named {u['output']} and send it back. */\n\n"
+                          f"{common['sql']};\n")
         tpl = GENERIC_PS if os_key == "windows" else GENERIC_PY
         return name, tpl.format(**common)
 

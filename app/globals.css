@@ -24,6 +24,29 @@
 :root {
   color-scheme: light;
 
+  /* -- Sentinel Site Activation palette ------------------------------------
+   * Taken from the Ministry of Health field guide at
+   * pattkab.github.io/sentinelsitesactivation (read from its own :root on
+   * 29 Sep 2026), so the compiler and the activation guide read as one
+   * programme. Deep green carries the header, the muted green is the working
+   * accent (buttons, links, active states), and gold marks what is current.
+   * The Tabler tokens below are re-pointed at these rather than removed,
+   * because every page reads the Tabler names. */
+  --ss-green:  #123b3a;
+  --ss-accent: #146c59;
+  --ss-gold:   #edc669;
+  --ss-ink:    #182e35;
+  --ss-muted:  #5e7075;
+  --ss-line:   #dfe7e7;
+  --ss-bg:     #f4f7f8;
+  --ss-tint:   #edf3f1;
+  /* The guide's category tints, for series that need telling apart. */
+  --ss-blue:   #426699;
+  --ss-purple: #783887;
+  --ss-amber:  #997026;
+  --ss-rust:   #a85a38;
+  --ss-leaf:   #27745e;
+
   /* -- Tabler palette ----------------------------------------------------- */
   --tblr-blue:   #066fd1;
   --tblr-azure:  #4299e1;
@@ -49,32 +72,32 @@
   --tblr-gray-800: #1f2937;
   --tblr-gray-900: #111827;
 
-  --tblr-primary:       #066fd1;
-  --tblr-primary-rgb:   6, 111, 209;
+  --tblr-primary:       #146c59;
+  --tblr-primary-rgb:   20, 108, 89;
   /* Secondary TEXT is now near-black, not grey. Requested, and it matches
      idrc-uganda.org's own #181818 body colour. Only text tokens change:
      --tblr-gray-* stay grey because they are surfaces, borders and
      gridlines, and a black hairline grid would shout over the data. */
-  --tblr-secondary:     #181818;
-  --tblr-success:       #2fb344;
-  --tblr-info:          #4299e1;
-  --tblr-warning:       #f59f00;
-  --tblr-danger:        #d63939;
+  --tblr-secondary:     #5e7075;
+  --tblr-success:       #27745e;
+  --tblr-info:          #426699;
+  --tblr-warning:       #c9971f;
+  --tblr-danger:        #b4402f;
 
-  --tblr-body-bg:        #f9fafb;
-  --tblr-body-color:     #181818;
-  --tblr-body-color-rgb: 24, 24, 24;
+  --tblr-body-bg:        #f4f7f8;
+  --tblr-body-color:     #182e35;
+  --tblr-body-color-rgb: 24, 46, 53;
   --tblr-surface:        #ffffff;
-  --tblr-surface-secondary: #f9fafb;
+  --tblr-surface-secondary: #edf3f1;
 
-  --tblr-border-color: #e5e7eb;
-  --tblr-border-translucent: rgba(4, 32, 69, .1);
+  --tblr-border-color: #dfe7e7;
+  --tblr-border-translucent: rgba(18, 59, 58, .12);
   --tblr-active-bg: rgba(var(--tblr-primary-rgb), .04);
 
   /* -- shape -------------------------------------------------------------- */
   --tblr-border-radius:    6px;
   --tblr-border-radius-sm: 4px;
-  --tblr-border-radius-lg: 8px;
+  --tblr-border-radius-lg: 13px;
   --tblr-border-radius-pill: 100rem;
 
   --tblr-shadow-card:  0 0 4px rgba(var(--tblr-body-color-rgb), .04);
@@ -112,17 +135,17 @@
   --tblr-font-weight-bold: 700;
 
   /* -- legacy aliases, still read by inline styles across the pages -------- */
-  --navy:   #181818;
-  --navy-2: #066fd1;
-  --gold:   #f59f00;
-  --ink:    #181818;
-  --muted:  #181818;   /* legacy alias for secondary TEXT */
-  --line:   #e5e7eb;
-  --bg:     #f9fafb;
+  --navy:   #123b3a;
+  --navy-2: #146c59;
+  --gold:   #edc669;
+  --ink:    #182e35;
+  --muted:  #5e7075;   /* legacy alias for secondary TEXT */
+  --line:   #dfe7e7;
+  --bg:     #f4f7f8;
   --card:   #ffffff;
-  --ok:     #2fb344;
-  --warn:   #f59f00;
-  --bad:    #d63939;
+  --ok:     #27745e;
+  --warn:   #c9971f;
+  --bad:    #b4402f;
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -310,6 +333,25 @@ main {
 }
 .navbar-nav .nav-link svg { flex: none; }
 
+/* Sentinel header. The brand bar takes the guide's deep green, the way its
+   side panel does, with the crest set on a white tile so a logo drawn for a
+   light ground keeps its colours. The menu strip stays light for legibility;
+   its current page is marked in the accent green over a gold rule. */
+.navbar { background: var(--ss-green); border-bottom-color: rgba(0, 0, 0, .2); }
+.navbar-brand, .navbar-brand:hover { color: #fff; }
+.navbar-brand small { color: #b9d0cc; }
+.navbar-brand img {
+  background: #fff; border-radius: 8px; padding: 3px;
+  height: 40px; width: 40px;
+}
+.navbar-user .navbar-user-meta strong { color: #fff; }
+.navbar-user .navbar-user-meta span { color: #b9d0cc; }
+.navbar .avatar { color: var(--ss-green); background: var(--ss-gold); box-shadow: none; }
+.navbar .btn.ghost { color: #e3ecea; }
+.navbar .btn.ghost:hover { color: #fff; background: rgba(255, 255, 255, .08); }
+.navbar-nav .nav-link.active { color: var(--ss-accent); border-bottom-color: var(--ss-gold); }
+.navbar-nav .nav-link:hover { color: var(--ss-green); }
+
 /* Legacy .topbar. Nothing renders it any more, but a page added from an older
    branch would otherwise land unstyled. */
 .topbar {
@@ -468,8 +510,8 @@ main {
   background: var(--tblr-primary);
   border-color: var(--tblr-primary);
 }
-.btn:hover, .btn.primary:hover { background: #0561ba; border-color: #0561ba; }
-.btn:active, .btn.primary:active { background: #0558a6; }
+.btn:hover, .btn.primary:hover { background: var(--ss-green); border-color: var(--ss-green); }
+.btn:active, .btn.primary:active { background: #0d2c2b; }
 
 .btn.secondary {
   color: var(--tblr-body-color);
@@ -478,12 +520,12 @@ main {
 }
 .btn.secondary:hover { background: var(--tblr-gray-50); border-color: var(--tblr-gray-300); }
 
-.btn.gold    { color: #fff; background: var(--tblr-warning); border-color: var(--tblr-warning); }
-.btn.gold:hover { background: #dd9000; border-color: #dd9000; }
+.btn.gold    { color: var(--ss-green); background: var(--ss-gold); border-color: var(--ss-gold); }
+.btn.gold:hover { background: #e3b74f; border-color: #e3b74f; }
 .btn.success { color: #fff; background: var(--tblr-success); border-color: var(--tblr-success); }
-.btn.success:hover { background: #2aa13d; border-color: #2aa13d; }
+.btn.success:hover { background: #1f5f4d; border-color: #1f5f4d; }
 .btn.danger  { color: #fff; background: var(--tblr-danger); border-color: var(--tblr-danger); }
-.btn.danger:hover  { background: #c03434; border-color: #c03434; }
+.btn.danger:hover  { background: #9a3527; border-color: #9a3527; }
 .btn.ghost {
   color: var(--tblr-secondary); background: transparent;
   border-color: transparent; box-shadow: none;
@@ -620,12 +662,12 @@ tbody tr:hover td { background: rgba(var(--tblr-body-color-rgb), .02); }
   color: var(--tblr-secondary);
   background: var(--tblr-surface-secondary);
 }
-.badge.ok      { color: #1f7a30; background: rgba(47, 179, 68, .12);  border-color: rgba(47, 179, 68, .2); }
-.badge.warn    { color: #9a6400; background: rgba(245, 159, 0, .14);  border-color: rgba(245, 159, 0, .24); }
-.badge.bad     { color: #a72929; background: rgba(214, 57, 57, .12);  border-color: rgba(214, 57, 57, .2); }
+.badge.ok      { color: #1f5f4d; background: rgba(39, 116, 94, .12);  border-color: rgba(39, 116, 94, .2); }
+.badge.warn    { color: #8a6414; background: rgba(237, 198, 105, .14);  border-color: rgba(237, 198, 105, .24); }
+.badge.bad     { color: #9a3527; background: rgba(180, 64, 47, .12);  border-color: rgba(180, 64, 47, .2); }
 .badge.muted   { color: var(--tblr-gray-600); background: var(--tblr-gray-100); border-color: var(--tblr-gray-200); }
-.badge.info    { color: #2b6cb0; background: rgba(66, 153, 225, .14); border-color: rgba(66, 153, 225, .24); }
-.badge.primary { color: #0558a6; background: rgba(var(--tblr-primary-rgb), .1); border-color: rgba(var(--tblr-primary-rgb), .2); }
+.badge.info    { color: #35577f; background: rgba(66, 102, 153, .14); border-color: rgba(66, 102, 153, .24); }
+.badge.primary { color: #0f5646; background: rgba(var(--tblr-primary-rgb), .1); border-color: rgba(var(--tblr-primary-rgb), .2); }
 .badge.pill    { border-radius: var(--tblr-border-radius-pill); padding-inline: .625em; }
 
 /* Tabler's status dot: a coloured disc that reads at a glance in a dense row. */
@@ -641,10 +683,10 @@ tbody tr:hover td { background: rgba(var(--tblr-body-color-rgb), .02); }
 .status-dot.warn    { background: var(--tblr-warning); }
 .status-dot.bad     { background: var(--tblr-danger); }
 .status-dot.primary { background: var(--tblr-primary); }
-.status-dot.animated { box-shadow: 0 0 0 0 rgba(47, 179, 68, .5); animation: status-pulse 2s infinite; }
+.status-dot.animated { box-shadow: 0 0 0 0 rgba(39, 116, 94, .5); animation: status-pulse 2s infinite; }
 @keyframes status-pulse {
-  70%  { box-shadow: 0 0 0 .5rem rgba(47, 179, 68, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(47, 179, 68, 0); }
+  70%  { box-shadow: 0 0 0 .5rem rgba(39, 116, 94, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(39, 116, 94, 0); }
 }
 .status {
   display: inline-flex; align-items: center; gap: .5rem;
@@ -676,9 +718,9 @@ tbody tr:hover td { background: rgba(var(--tblr-body-color-rgb), .02); }
 .avatar.danger  { color: #fff; background: var(--tblr-danger);  box-shadow: none; }
 .avatar.azure   { color: #fff; background: var(--tblr-azure);   box-shadow: none; }
 .avatar.soft-primary { color: var(--tblr-primary); background: rgba(var(--tblr-primary-rgb), .1); box-shadow: none; }
-.avatar.soft-success { color: #1f7a30; background: rgba(47, 179, 68, .12); box-shadow: none; }
-.avatar.soft-warning { color: #9a6400; background: rgba(245, 159, 0, .14); box-shadow: none; }
-.avatar.soft-danger  { color: #a72929; background: rgba(214, 57, 57, .12); box-shadow: none; }
+.avatar.soft-success { color: #1f5f4d; background: rgba(39, 116, 94, .12); box-shadow: none; }
+.avatar.soft-warning { color: #8a6414; background: rgba(237, 198, 105, .14); box-shadow: none; }
+.avatar.soft-danger  { color: #9a3527; background: rgba(180, 64, 47, .12); box-shadow: none; }
 
 /* ================================================================= stat tile
  *
@@ -767,9 +809,9 @@ tbody tr:hover td { background: rgba(var(--tblr-body-color-rgb), .02); }
   color: #fff;
 }
 .steps .step.done {
-  background: rgba(47, 179, 68, .1);
-  border-color: rgba(47, 179, 68, .3);
-  color: #1f7a30;
+  background: rgba(39, 116, 94, .1);
+  border-color: rgba(39, 116, 94, .3);
+  color: #1f5f4d;
 }
 .steps .step.done::before { content: '✓'; font-weight: 700; }
 
@@ -924,10 +966,10 @@ tbody tr:hover td { background: rgba(var(--tblr-body-color-rgb), .02); }
   margin: .75rem 0;
   font-size: .875rem;
 }
-.alert.error   { color: #a72929; background: rgba(214, 57, 57, .08);  border-color: rgba(214, 57, 57, .2); }
-.alert.success { color: #1f7a30; background: rgba(47, 179, 68, .08);  border-color: rgba(47, 179, 68, .2); }
-.alert.info    { color: #2b6cb0; background: rgba(66, 153, 225, .08); border-color: rgba(66, 153, 225, .22); }
-.alert.warn    { color: #9a6400; background: rgba(245, 159, 0, .1);   border-color: rgba(245, 159, 0, .24); }
+.alert.error   { color: #9a3527; background: rgba(180, 64, 47, .08);  border-color: rgba(180, 64, 47, .2); }
+.alert.success { color: #1f5f4d; background: rgba(39, 116, 94, .08);  border-color: rgba(39, 116, 94, .2); }
+.alert.info    { color: #35577f; background: rgba(66, 102, 153, .08); border-color: rgba(66, 102, 153, .22); }
+.alert.warn    { color: #8a6414; background: rgba(237, 198, 105, .1);   border-color: rgba(237, 198, 105, .24); }
 .alert a { color: inherit; text-decoration: underline; }
 
 /* ================================================================== progress */
@@ -970,9 +1012,9 @@ tbody tr:hover td { background: rgba(var(--tblr-body-color-rgb), .02); }
 /* ================================================================== helpers */
 
 .text-secondary { color: var(--tblr-secondary); }
-.text-success   { color: #1f7a30; }
-.text-danger    { color: #a72929; }
-.text-warning   { color: #9a6400; }
+.text-success   { color: #1f5f4d; }
+.text-danger    { color: #9a3527; }
+.text-warning   { color: #8a6414; }
 .text-primary   { color: var(--tblr-primary); }
 .text-end       { text-align: right; }
 .text-nowrap    { white-space: nowrap; }
@@ -1032,5 +1074,5 @@ tbody tr:hover td { background: rgba(var(--tblr-body-color-rgb), .02); }
 @media print {
   .navbar, .navbar-secondary, .topbar, .footer, .btn { display: none !important; }
   body { background: #fff; }
-  .card { box-shadow: none; border-color: #d1d5db; break-inside: avoid; }
+  .card { box-shadow: none; border-color: #dfe7e7; break-inside: avoid; }
 }

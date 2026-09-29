@@ -98,14 +98,14 @@ function RateTrend({ points }) {
         aria-label="Average reporting rate by month">
         {ticks.map((v) => (
           <g key={v}>
-            <line x1={padL} x2={W - padR} y1={yOf(v)} y2={yOf(v)} stroke="#e5e7eb" strokeWidth="1" />
-            <text x={padL - 8} y={yOf(v) + 4} textAnchor="end" fontSize="11" fill="#181818">{v}%</text>
+            <line x1={padL} x2={W - padR} y1={yOf(v)} y2={yOf(v)} stroke="#dfe7e7" strokeWidth="1" />
+            <text x={padL - 8} y={yOf(v) + 4} textAnchor="end" fontSize="11" fill="#182e35">{v}%</text>
           </g>
         ))}
 
         <path
           d={points.map((p, i) => `${i ? 'L' : 'M'}${xOf(i)},${yOf(p.rate)}`).join('')}
-          fill="none" stroke="#066fd1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+          fill="none" stroke="#146c59" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
         />
 
         {points.map((p, i) => (
@@ -113,12 +113,12 @@ function RateTrend({ points }) {
             {/* A 2px surface ring keeps the marker legible where it sits on
                 the line, and widens the hit target at the same time. */}
             <circle cx={xOf(i)} cy={yOf(p.rate)} r={hover === i ? 5 : 4}
-              fill="#066fd1" stroke="#fff" strokeWidth="2" />
+              fill="#146c59" stroke="#fff" strokeWidth="2" />
             {/* Label every other month counting back from the newest, so the
                 run ends on the current period instead of leaving two labels
                 adjacent at the right edge. */}
             {(points.length <= 6 || (points.length - 1 - i) % 2 === 0) && (
-              <text x={xOf(i)} y={H - 10} textAnchor="middle" fontSize="11" fill="#181818">
+              <text x={xOf(i)} y={H - 10} textAnchor="middle" fontSize="11" fill="#182e35">
                 {p.label.slice(0, 3)}
               </text>
             )}
@@ -128,7 +128,7 @@ function RateTrend({ points }) {
         ))}
 
         <text x={xOf(points.length - 1) + 10} y={yOf(last.rate) + 4}
-          fontSize="12" fontWeight="600" fill="#1f2937">{last.rate}%</text>
+          fontSize="12" fontWeight="600" fill="#182e35">{last.rate}%</text>
       </svg>
 
       {active && (() => {

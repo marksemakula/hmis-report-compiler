@@ -40,8 +40,8 @@ import { SCOPE_LEVELS, yearLabel, apiFailure } from './lib';
  * the worst colour-vision case.
  */
 
-const SCREENED = '#066fd1';
-const NOT_SCREENED = '#d63939';
+const SCREENED = '#146c59';
+const NOT_SCREENED = '#b4402f';
 const AGE_RAMP = ['#c9e7e2', '#8fd0c8', '#4fb3a8', '#1d8a80', '#0b5c56'];
 
 const nf = (n) => Number(n || 0).toLocaleString('en-GB');
@@ -564,7 +564,7 @@ export default function TbScreening() {
 
               <g pointerEvents="none">
                 <text x={C} y={C + bigSize * 0.2} textAnchor="middle" fontSize={bigSize}
-                  fontWeight="700" fill="#111827">
+                  fontWeight="700" fill="#182e35">
                   {rate === null ? '-' : `${Math.round(rate)}%`}
                 </text>
                 <text x={C} y={C + bigSize * 0.2 + subSize * 1.55} textAnchor="middle"

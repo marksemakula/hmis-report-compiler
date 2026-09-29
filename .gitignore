@@ -11,3 +11,8 @@ public/*.xlsx
 public/*.xls
 *.xlsx
 !public/templates/*
+
+# The Ministry audit workbooks as received carry real client rows (ART
+# numbers, names, CHW phone numbers). Anything under public/ is served to the
+# internet without sign-in, so they live here instead, and never in git.
+private/

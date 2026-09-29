@@ -19,8 +19,8 @@ import useWidth from './usewidth';
  * two groups stay separable for a colourblind reader; each group is also
  * headed in words, so colour is never the only thing carrying the distinction.
  */
-const ALL_CAUSE = '#066fd1';
-const MPDSR = '#0ca678';
+const ALL_CAUSE = '#146c59';
+const MPDSR = '#27745e';
 
 /* The inpatient death rate against the hospital's standard.
  *
@@ -40,9 +40,9 @@ const MPDSR = '#0ca678';
  * so the breach never rests on colour. The standard itself is a recessive gray
  * rule, dashed and named, so it reads as a limit rather than a third series -
  * the ordinary gridlines are solid hairlines for the same reason. */
-const RATE = '#066fd1';
-const OVER = '#d63939';
-const STANDARD_RULE = '#6b7280';
+const RATE = '#146c59';
+const OVER = '#b4402f';
+const STANDARD_RULE = '#5e7075';
 
 
 const nf = (n) => (n === null || n === undefined ? null : Number(n).toLocaleString('en-GB'));
@@ -93,8 +93,8 @@ function Bars({ rows, colour, max, empty }) {
  * Not pink and blue: that convention encodes nothing and misleads about which
  * slice is which.
  */
-const SEX_COLOURS = ['#7048e8', '#f76707'];
-const AGE_RAMP = ['#e8f1fc', '#bcd7f4', '#7cb0e5', '#3b86d4', '#0a4f96'];
+const SEX_COLOURS = ['#783887', '#a85a38'];
+const AGE_RAMP = ['#eaf4f0', '#c3e0d7', '#7fb8a8', '#2f8a74', '#123b3a'];
 /* "Not recorded" is not a category, it is the absence of one, and it must never
    take a step of the ramp: with a plain index the sixth slice wrapped back to
    the palest blue and read as a second neonatal band. */
@@ -187,10 +187,10 @@ function Demographics({ data }) {
         <Ring rows={sex} colours={SEX_COLOURS} rOuter={56} rInner={34} total={sexTotal} cx={c} cy={c} />
         {/* The total belongs in the hole: it is what both rings add up to, and
             a reader should not have to sum a legend to find it. */}
-        <text x={c} y={c - 2} textAnchor="middle" fontSize="22" fontWeight="600" fill="#181818">
+        <text x={c} y={c - 2} textAnchor="middle" fontSize="22" fontWeight="600" fill="#182e35">
           {ageTotal || sexTotal}
         </text>
-        <text x={c} y={c + 14} textAnchor="middle" fontSize="10" fill="#181818">deaths</text>
+        <text x={c} y={c + 14} textAnchor="middle" fontSize="10" fill="#182e35">deaths</text>
       </svg>
 
       <div style={{ flex: 1, minWidth: 190 }}>
@@ -270,8 +270,8 @@ function RateTrend({ months, standard }) {
         {ticks.map((v) => (
           <g key={v}>
             <line x1={padL} x2={W - padR} y1={yOf(v)} y2={yOf(v)}
-              stroke="#e5e7eb" strokeWidth="1" />
-            <text x={padL - 6} y={yOf(v) + 3.5} textAnchor="end" fontSize="9" fill="#6b7280">
+              stroke="#dfe7e7" strokeWidth="1" />
+            <text x={padL - 6} y={yOf(v) + 3.5} textAnchor="end" fontSize="9" fill="#5e7075">
               {v}%
             </text>
           </g>
@@ -303,13 +303,13 @@ function RateTrend({ months, standard }) {
             {labelled.has(p.period) && (
               <text x={xOf(i)} y={yOf(p.rate) - 9}
                 textAnchor={i === 0 ? 'start' : i === points.length - 1 ? 'end' : 'middle'}
-                fontSize="10" fontWeight="700" fill={p.overStandard ? OVER : '#111827'}
+                fontSize="10" fontWeight="700" fill={p.overStandard ? OVER : '#182e35'}
                 stroke="#fff" strokeWidth="3" paintOrder="stroke">
                 {p.rate}%
               </text>
             )}
             {(points.length <= 6 || i % 2 === 0 || i === points.length - 1) && (
-              <text x={xOf(i)} y={H - 6} textAnchor="middle" fontSize="9" fill="#6b7280">
+              <text x={xOf(i)} y={H - 6} textAnchor="middle" fontSize="9" fill="#5e7075">
                 {p.short}
               </text>
             )}

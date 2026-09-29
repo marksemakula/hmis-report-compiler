@@ -127,7 +127,7 @@ function labelPlacement(geometry, project) {
  * lowest band" - the difference between a district that filed badly and one
  * that did not file at all.
  */
-const RAMP = ['#e8f1fc', '#bcd7f4', '#7cb0e5', '#3b86d4', '#0a4f96'];
+const RAMP = ['#eaf4f0', '#c3e0d7', '#7fb8a8', '#2f8a74', '#123b3a'];
 const NO_DATA = 'url(#nodata)';
 
 /** Fixed bands for a percentage. The same colour means the same rate in every
@@ -458,8 +458,8 @@ export default function DistrictMap({ homeDistrictOnly = false }) {
                 lowest band. */}
             <pattern id="nodata" width="6" height="6" patternUnits="userSpaceOnUse"
               patternTransform="rotate(45)">
-              <rect width="6" height="6" fill="#f3f4f6" />
-              <line x1="0" y1="0" x2="0" y2="6" stroke="#c9ced6" strokeWidth="1.5" />
+              <rect width="6" height="6" fill="#edf3f1" />
+              <line x1="0" y1="0" x2="0" y2="6" stroke="#cfdcda" strokeWidth="1.5" />
             </pattern>
           </defs>
 
@@ -468,7 +468,7 @@ export default function DistrictMap({ homeDistrictOnly = false }) {
               key={d.id}
               className="district"
               d={shapePath(d.geometry, project)}
-              fill={scale ? scale.colourOf(values.values[d.id] ?? null) : '#f3f4f6'}
+              fill={scale ? scale.colourOf(values.values[d.id] ?? null) : '#edf3f1'}
               fillRule="evenodd"
               onMouseEnter={() => setHover({ id: d.id, name: d.name })}
               onMouseLeave={() => setHover(null)}
@@ -491,7 +491,7 @@ export default function DistrictMap({ homeDistrictOnly = false }) {
           {placements.filter((pl) => pl.fits).map((pl) => (
             <text key={`${pl.id}-label`} x={pl.x} y={pl.y} textAnchor="middle"
               fontSize={labelSize} fontWeight={pl.id === geo.facilityDistrict ? 700 : 500}
-              fill="#181818" stroke="#ffffff" strokeWidth="3" paintOrder="stroke"
+              fill="#182e35" stroke="#ffffff" strokeWidth="3" paintOrder="stroke"
               style={{ pointerEvents: 'none' }}>
               {pl.name}
             </text>
@@ -525,7 +525,7 @@ export default function DistrictMap({ homeDistrictOnly = false }) {
         <span className="swatch">
           <i style={{
             backgroundImage:
-              'repeating-linear-gradient(45deg,#f3f4f6 0 2px,#c9ced6 2px 3.5px)',
+              'repeating-linear-gradient(45deg,#edf3f1 0 2px,#cfdcda 2px 3.5px)',
           }} />
           No data
         </span>

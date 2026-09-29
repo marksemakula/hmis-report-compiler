@@ -1,0 +1,2 @@
+# Never upload patient-bearing files to a deployment.
+private/

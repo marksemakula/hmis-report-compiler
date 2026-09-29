@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
   IconDashboard, IconUpload, IconTerminal, IconEye,
-  IconReport, IconHistory, IconSettings, IconLogout,
+  IconReport, IconHistory, IconSettings, IconLogout, IconClipboardCheck,
 } from './icons';
 
 export default function Nav() {
@@ -35,6 +35,10 @@ export default function Nav() {
     { href: '/', label: 'Dashboard', Icon: IconDashboard },
     { href: '/preview', label: 'Preview', Icon: IconEye },
     { href: '/reports', label: 'Reports', Icon: IconReport },
+    /* The clinical audits run entirely in the browser on a line list the
+       user loads, so they are open to every role; only the schema script on
+       that page is a data officer's. */
+    { href: '/clinical-audits', label: 'Clinical Audits', Icon: IconClipboardCheck },
     { href: '/audit', label: 'Audit Trail', Icon: IconHistory },
   ];
   if (user && user.role !== 'viewer') {

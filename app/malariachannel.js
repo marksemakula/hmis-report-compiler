@@ -43,18 +43,18 @@ import { apiFailure } from './lib';
  *
  * On the amber: measured against this surface it is 2.08:1, below the 3:1 a
  * mark should clear, and darkening it collides with the red - a darker orange
- * measures 13.7 from #d63939 in OKLab, under the 15 at which full-colour
+ * measures 13.7 from #b4402f in OKLab, under the 15 at which full-colour
  * readers can still tell two marks apart. It keeps its hue and earns the
  * contrast back the way the guidance allows: a visible label on the line
  * itself, plus every figure in the tooltip.
  */
 const INK = '#0b0b0b';
 const MUTED = '#898781';      // the median and lower-limit MARKS
-const TEXT = '#181818';       // every label on the chart
+const TEXT = '#182e35';       // every label on the chart
 const GRID = '#e1e0d9';
 const BAND_FILL = 'rgba(82,81,78,.13)';
-const ALERT_COLOUR = '#f59f00';
-const EPIDEMIC_COLOUR = '#d63939';
+const ALERT_COLOUR = '#c9971f';
+const EPIDEMIC_COLOUR = '#b4402f';
 
 const STATUS = {
   normal: { badge: 'ok', word: 'Within the expected channel' },
