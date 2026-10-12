@@ -1053,13 +1053,27 @@ tbody tr:hover td { background: rgba(var(--tblr-body-color-rgb), .02); }
   background: var(--tblr-body-bg);
 }
 .login-card {
+  position: relative;
   background: var(--tblr-surface);
   border: 1px solid var(--tblr-border-translucent);
   border-radius: var(--tblr-border-radius-lg);
   box-shadow: var(--tblr-shadow-dropdown);
   padding: 2rem;
+  padding-top: 6rem;
   width: 100%;
   max-width: 25rem;
+}
+/* Straddles the card's top edge: half floats above it, half overlaps inside -
+   padding-top on .login-card above is sized to clear the overlapping half. */
+.login-logo {
+  display: block;
+  position: absolute;
+  top: -4.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  height: 9rem;
+  width: 9rem;
+  object-fit: contain;
 }
 .login-card h1 { text-align: center; font-size: 1.25rem; }
 .login-card .sub {
