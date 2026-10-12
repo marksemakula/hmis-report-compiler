@@ -1059,7 +1059,7 @@ tbody tr:hover td { background: rgba(var(--tblr-body-color-rgb), .02); }
   border-radius: var(--tblr-border-radius-lg);
   box-shadow: var(--tblr-shadow-dropdown);
   padding: 2rem;
-  padding-top: 6rem;
+  padding-top: 10.5rem;
   width: 100%;
   max-width: 25rem;
 }
@@ -1068,11 +1068,11 @@ tbody tr:hover td { background: rgba(var(--tblr-body-color-rgb), .02); }
 .login-logo {
   display: block;
   position: absolute;
-  top: -4.5rem;
+  top: -9rem;
   left: 50%;
   transform: translateX(-50%);
-  height: 9rem;
-  width: 9rem;
+  height: 18rem;
+  width: 18rem;
   object-fit: contain;
 }
 .login-card h1 { text-align: center; font-size: 1.25rem; }
