@@ -36,7 +36,6 @@ export default function Login() {
       <form className="login-card" onSubmit={submit}>
         <img src="/logo.png" alt="Jinja Regional Referral Hospital" className="login-logo" />
         <h1>HMIS Report Compiler</h1>
-        <div className="sub">Jinja Regional Referral Hospital · eHMIS 105 &amp; 108</div>
         <label>Email address</label>
         <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus />
         <div style={{ height: 12 }} />
