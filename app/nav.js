@@ -56,7 +56,7 @@ export default function Nav() {
       <header className="navbar">
         <div className="container-xl">
           <Link href="/" className="navbar-brand">
-            <img src="/logo.png" alt="Jinja Regional Referral Hospital" />
+            <img src="/logo.png" alt="Coat of Arms of the Republic of Uganda" />
             <span>
               HMIS Report Compiler
               <small>Jinja Regional Referral Hospital</small>

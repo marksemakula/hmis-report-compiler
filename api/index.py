@@ -1006,7 +1006,10 @@ def preview(report_type: str, period: str, user: dict = Depends(current_user)):
 
     return Response(content=doc, media_type="text/html; charset=utf-8",
                     headers={"Cache-Control": "no-store",
-                             "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; img-src data:"})
+                             "Content-Security-Policy": (
+                                 "default-src 'none'; "
+                                 "style-src 'unsafe-inline' https://fonts.googleapis.com; "
+                                 "font-src https://fonts.gstatic.com; img-src data:")})
 
 
 @app.post("/api/py/forms/refresh")

@@ -253,7 +253,7 @@ function Channel({ data }) {
           <div style={{
             position: 'absolute', top: 0, left: `${pctX}%`, transform: shift,
             pointerEvents: 'none', background: '#fff', border: '1px solid rgba(4,32,69,.1)',
-            borderRadius: 6, boxShadow: '0 16px 24px 2px rgba(0,0,0,.07)',
+            borderRadius: 0, boxShadow: '0 16px 24px 2px rgba(0,0,0,.07)',
             padding: '.5rem .625rem', fontSize: '.75rem', whiteSpace: 'nowrap', zIndex: 2,
           }}>
             <div className="fw-bold" style={{ marginBottom: '.25rem' }}>

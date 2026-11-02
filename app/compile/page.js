@@ -409,7 +409,7 @@ export default function Workflow() {
               {compiled.unmapped.slice(0, 12).map((u) => `${u.code} (${u.records})`).join(', ')}
             </div>
           )}
-          <div style={{ maxHeight: 420, overflow: 'auto', border: '1px solid var(--line)', borderRadius: 8 }}>
+          <div style={{ maxHeight: 420, overflow: 'auto', border: '1px solid var(--line)', borderRadius: 0 }}>
             <table>
               <thead><tr><th>Data element</th><th>Disaggregation</th><th style={{ textAlign: 'right' }}>Value</th></tr></thead>
               <tbody>

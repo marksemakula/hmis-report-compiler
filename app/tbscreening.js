@@ -583,7 +583,7 @@ export default function TbScreening() {
                 <div key={s.key} className="d-flex items-center gap-2"
                   style={{ padding: '.3125rem 0', fontSize: '.8125rem' }}
                   onMouseEnter={() => setHover(s.key)} onMouseLeave={() => setHover(null)}>
-                  <span style={{ width: 10, height: 10, borderRadius: 3, background: s.colour, flex: 'none' }} />
+                  <span style={{ width: 10, height: 10, borderRadius: 0, background: s.colour, flex: 'none' }} />
                   <span style={{ color: 'var(--tblr-body-color)', minWidth: 0, flex: 1 }}>{s.label}</span>
                   <span className="fw-bold" style={{ color: s.colour, flex: 'none',
                     paddingLeft: '.75rem', whiteSpace: 'nowrap' }}>{nf(s.value)}</span>
@@ -607,7 +607,7 @@ export default function TbScreening() {
                   <div key={a.key} className="d-flex items-center gap-2"
                     style={{ padding: '.1875rem 0', fontSize: '.75rem' }}
                     onMouseEnter={() => setHover(`age-${a.key}`)} onMouseLeave={() => setHover(null)}>
-                    <span style={{ width: 10, height: 10, borderRadius: 3,
+                    <span style={{ width: 10, height: 10, borderRadius: 0,
                       background: a.colour, flex: 'none' }} />
                     <span style={{ color: 'var(--tblr-body-color)', minWidth: 0, flex: 1 }}>{a.label}</span>
                     <span className="fw-medium" style={{ flex: 'none', paddingLeft: '.75rem',

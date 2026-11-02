@@ -179,7 +179,7 @@ export default function ClinicalAudits() {
             >
               <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 8 }}>
                 <span style={{
-                  width: 34, height: 34, borderRadius: 9, display: 'grid', placeItems: 'center',
+                  width: 34, height: 34, borderRadius: 0, display: 'grid', placeItems: 'center',
                   background: TINT[k].bg, color: TINT[k].fg, fontWeight: 700, fontSize: 13,
                 }}
                 >

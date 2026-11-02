@@ -62,7 +62,7 @@ function Bars({ rows, colour, max, empty }) {
           }} title={r.cause}>{r.cause}</span>
           <span style={{ flex: 1, minWidth: 0 }}>
             <span style={{
-              display: 'block', height: 12, borderRadius: 2, background: colour,
+              display: 'block', height: 12, borderRadius: 0, background: colour,
               width: `${Math.max(3, (r.deaths / Math.max(max, 1)) * 100)}%`,
             }} />
           </span>
@@ -151,7 +151,7 @@ function Key({ rows, colours, total }) {
       {rows.map((r, i) => (
         <div key={r.label} className="d-flex items-center gap-2"
           style={{ fontSize: '.6875rem', marginBottom: '.2rem' }}>
-          <span style={{ width: 10, height: 10, borderRadius: 2, flex: 'none',
+          <span style={{ width: 10, height: 10, borderRadius: 0, flex: 'none',
             background: colourFor(rows, colours)(r, i),
             boxShadow: 'inset 0 0 0 1px rgba(4,32,69,.12)' }} />
           <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis',
@@ -212,7 +212,7 @@ function tipShift(percent) {
 
 const TIP = {
   position: 'absolute', top: 0, pointerEvents: 'none',
-  background: '#fff', border: '1px solid rgba(4,32,69,.1)', borderRadius: 6,
+  background: '#fff', border: '1px solid rgba(4,32,69,.1)', borderRadius: 0,
   boxShadow: '0 16px 24px 2px rgba(0,0,0,.07)', padding: '.4rem .5rem',
   fontSize: '.6875rem', whiteSpace: 'nowrap', zIndex: 2,
 };
@@ -572,7 +572,7 @@ export default function Mortality({ scope = 'facility' }) {
 
         <div style={{ borderTop: '1px solid var(--tblr-border-color)', paddingTop: '.5rem' }}>
           <div className="d-flex items-center gap-2" style={{ marginBottom: '.35rem' }}>
-            <span style={{ width: 10, height: 10, borderRadius: 2, background: ALL_CAUSE, flex: 'none' }} />
+            <span style={{ width: 10, height: 10, borderRadius: 0, background: ALL_CAUSE, flex: 'none' }} />
             <span className="fw-medium" style={{ fontSize: '.75rem' }}>All Cause Mortality</span>
             <span className="text-secondary ms-auto" style={{ fontSize: '.6875rem' }}>
               {data.certifiedInWindow} of {data.eventsRead} carry a cause
@@ -584,7 +584,7 @@ export default function Mortality({ scope = 'facility' }) {
 
         <div style={{ marginTop: '.6rem', borderTop: '1px solid var(--tblr-border-color)', paddingTop: '.5rem' }}>
           <div className="d-flex items-center gap-2" style={{ marginBottom: '.35rem' }}>
-            <span style={{ width: 10, height: 10, borderRadius: 2, background: MPDSR, flex: 'none' }} />
+            <span style={{ width: 10, height: 10, borderRadius: 0, background: MPDSR, flex: 'none' }} />
             {/* The full name, and under it the split: "MPDSR" over a single set
                 of bars does not say which half they came from, and here it is
                 mostly the perinatal half. */}

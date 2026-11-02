@@ -73,7 +73,7 @@ export default function Reports() {
           {detail.push_response && (
             <div className="alert info">DHIS2 response: {detail.push_response.status} - imported {detail.push_response.importCount?.imported ?? 0}, updated {detail.push_response.importCount?.updated ?? 0}, ignored {detail.push_response.importCount?.ignored ?? 0}</div>
           )}
-          <div style={{ maxHeight: 420, overflow: 'auto', border: '1px solid var(--line)', borderRadius: 8 }}>
+          <div style={{ maxHeight: 420, overflow: 'auto', border: '1px solid var(--line)', borderRadius: 0 }}>
             <table>
               <thead><tr><th>Data element</th><th>Disaggregation</th><th style={{ textAlign: 'right' }}>Value</th></tr></thead>
               <tbody>

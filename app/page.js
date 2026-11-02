@@ -51,7 +51,7 @@ function tipShift(percent) {
 
 const TIP_STYLE = {
   position: 'absolute', top: 0, pointerEvents: 'none',
-  background: '#fff', border: '1px solid rgba(4,32,69,.1)', borderRadius: 6,
+  background: '#fff', border: '1px solid rgba(4,32,69,.1)', borderRadius: 0,
   boxShadow: '0 16px 24px 2px rgba(0,0,0,.07)', padding: '.5rem .625rem',
   fontSize: '.75rem', whiteSpace: 'nowrap', zIndex: 2,
 };

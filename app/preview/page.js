@@ -154,7 +154,7 @@ export default function Preview() {
             </div>
           )}
 
-          <div style={{ marginTop: 14, border: '1px solid var(--line)', borderRadius: 8, overflow: 'hidden' }}>
+          <div style={{ marginTop: 14, border: '1px solid var(--line)', borderRadius: 0, overflow: 'hidden' }}>
             <iframe
               key={`${current.type}-${period}`}
               title={`${current.label} - ${period}`}

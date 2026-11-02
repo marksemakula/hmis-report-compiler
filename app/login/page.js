@@ -34,7 +34,7 @@ export default function Login() {
   return (
     <div className="login-wrap">
       <form className="login-card" onSubmit={submit}>
-        <img src="/logo.png" alt="Jinja Regional Referral Hospital" className="login-logo" />
+        <img src="/logo.png" alt="Coat of Arms of the Republic of Uganda" className="login-logo" />
         <h1>HMIS Report Compiler</h1>
         <label>Email address</label>
         <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus />

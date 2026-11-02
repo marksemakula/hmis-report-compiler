@@ -155,24 +155,39 @@ check('and the hint is rendered under the file picker',
       page.includes('REPORTS[reportType].takes'), true);
 check('no em dash in the hints', /—/.test(reportsBlock), false);
 
-/* House style: Gill Sans MT throughout, and text in near-black rather than grey.
+/* House style: Ubuntu throughout, square corners on every box, and text in
+ * near-black rather than grey.
  *
- * Both are set once, as tokens, so a component that hard-codes #6b7280 for a
- * label silently opts out of them. These checks are what stops that drifting
- * back in one component at a time.
+ * All three are set once, as tokens, so a component that hard-codes #6b7280
+ * for a label or a radius for a card silently opts out of them. These checks
+ * are what stops that drifting back in one component at a time.
  */
-console.log('\nThe house typeface and near-black text');
+console.log('\nThe house typeface, square corners and near-black text');
 const css = readFileSync(join(here, '..', 'app', 'globals.css'), 'utf8');
-check('Gill Sans MT leads the sans stack', /--tblr-font-sans-serif:\s*'Gill Sans MT'/.test(css), true);
-check('...with a fallback for machines that do not have it',
-      /Gill Sans MT'[^;]*Ubuntu/s.test(css), true);
+const sansStack = (css.match(/--tblr-font-sans-serif:\s*([^;]+);/) || [])[1] || '';
+const monoStack = (css.match(/--tblr-font-monospace:\s*([^;]+);/) || [])[1] || '';
+check('Ubuntu, as loaded by next/font, leads the sans stack', /^var\(--font-ubuntu\),/.test(sansStack), true);
+check('Ubuntu Mono, as loaded by next/font, leads the monospace stack',
+      /^var\(--font-ubuntu-mono\),/.test(monoStack), true);
+check('no other named typeface in either stack',
+      /gill|calibri|trebuchet|segoe|roboto|monaco|consolas|courier/i.test(sansStack + monoStack), false);
+const layoutSrc = readFileSync(join(here, '..', 'app', 'layout.js'), 'utf8');
+check('layout.js loads both faces and sets both variables on <html>',
+      /ubuntu\.variable\}\s+\$\{ubuntuMono\.variable/.test(layoutSrc), true);
+const radiusTokens = [...css.matchAll(/--tblr-border-radius[\w-]*:\s*([^;]+);/g)].map((m) => m[1].trim());
+check('every radius token is zero', radiusTokens.length >= 4 && radiusTokens.every((v) => v === '0'), true);
+const roundedDecls = [...css.matchAll(/(?<![\w-])border(?:-[a-z]+)*-radius:\s*([^;]+);/g)]
+  .map((m) => m[1].trim()).filter((v) => !/^(0|var\(--tblr-border-radius[\w-]*\))$/.test(v));
+check('no box is given a radius longhand', roundedDecls.join(', ') || 'none', 'none');
 check('secondary text is near-black', /--tblr-secondary:\s*#181818/.test(css), true);
 check('body text is near-black', /--tblr-body-color:\s*#181818/.test(css), true);
 check('gridline and surface greys are left alone',
       /--tblr-gray-500:\s*#6b7280/.test(css), true);
 
-for (const file of ['page.js', 'malariachannel.js', 'districtmap.js']) {
+for (const file of ['page.js', 'malariachannel.js', 'districtmap.js', 'mortality.js', 'tbscreening.js']) {
   const src = readFileSync(join(here, '..', 'app', file), 'utf8');
+  const rounded = [...src.matchAll(/borderRadius:\s*([1-9]\d*)/g)].map((m) => m[1]);
+  check(`${file} draws no rounded box inline`, rounded.join(',') || 'none', 'none');
   const greyText = [...src.matchAll(/fill="(#6b7280|#9ca3af|#52514e)"/g)].map((m) => m[1]);
   check(`${file} has no grey label colour left`, greyText.join(',') || 'none', 'none');
 }

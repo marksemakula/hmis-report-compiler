@@ -237,7 +237,7 @@ export default function ExtractScripts() {
             </>
           ) : (
             <>
-              <pre style={{ background: 'var(--pale, #E8F1F1)', padding: 12, borderRadius: 8,
+              <pre style={{ background: 'var(--pale, #E8F1F1)', padding: 12, borderRadius: 0,
                             overflowX: 'auto', marginTop: 8 }}>
 {osKey === 'windows'
   ? `.\\jrrh_extract_${report.toLowerCase()}_${period}.ps1 -User readonly_user`

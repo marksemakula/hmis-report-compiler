@@ -213,7 +213,7 @@ PAGE_CSS = """
 :root { --deep:#0F5257; --mid:#1B7B7B; --coral:#C2552E; --pale:#E8F1F1;
         --line:#D4E2E2; --ink:#1A1A1A; --grey:#6B7A7A; }
 body { margin:0; padding:0 0 40px; background:#fff; color:var(--ink);
-       font-family:'Gill Sans MT','Gill Sans',Calibri,'Trebuchet MS',sans-serif; font-size:13px; }
+       font-family:'Ubuntu',sans-serif; font-size:13px; }
 .hdr { background:var(--deep); color:#fff; padding:14px 20px; }
 .hdr h1 { margin:0; font-size:17px; font-weight:700; letter-spacing:.2px; }
 .hdr .sub { margin-top:3px; font-size:12px; color:#A8CFCF; }
@@ -244,6 +244,10 @@ body { margin:0; padding:0 0 40px; background:#fff; color:var(--ink);
 table { border-collapse:collapse; }
 td, th { padding:2px 5px; vertical-align:middle; }
 img { max-width:100%; }
+/* The official form is DHIS2's own markup and often names its own typeface and
+   rounds its own boxes inline. The compiler shows it the way it shows every
+   other screen: in Ubuntu, with square corners. */
+.wrap, .wrap * { font-family:'Ubuntu',sans-serif !important; border-radius:0 !important; }
 """
 
 
@@ -299,6 +303,12 @@ def render_document(report_type: str, period: str, period_label: str,
     return (
         "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+        # Ubuntu, the compiler's typeface, loaded here too because this page is
+        # served by the API on its own and does not pass through the Next.js
+        # layout that loads it for every other screen. The page's
+        # Content-Security-Policy (api/index.py) admits exactly these two
+        # Google Fonts hosts for styles and font files and nothing else.
+        "<link rel='stylesheet' href='https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;500;700&display=swap'>"
         f"<title>{html_lib.escape(ds.get('name', report_type))}</title>"
         f"<style>{PAGE_CSS}</style></head><body>"
         f"<div class='hdr'><h1>{html_lib.escape(ds.get('name', report_type))}</h1>"
