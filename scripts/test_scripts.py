@@ -196,8 +196,11 @@ check("over the distinct communities of the period",
 # A visit with no community is kept: absence of a ward name is not evidence of
 # a ward, and dropping the unclassifiable loses attendances silently.
 check("a visit with no community is kept", "ISNULL(comm.name, '')" in sql, True)
-check("two grains: attendance rows and condition rows",
-      sql.count("UNION ALL"), 1)
+# Three grains since November 2026: visits, conditions, and the emergency
+# section's casualty cases. Counted in the outer query only - the emergency
+# CTEs carry UNION ALLs of their own, gathering codes from three tables.
+check("three grains: attendance, condition and emergency-section rows",
+      sql[sql.index("\nSELECT  b.age_years"):].count("UNION ALL"), 2)
 check("attendance sentinel present", "'(attendance)'" in sql, True)
 
 print("\nRefusals")
@@ -492,14 +495,6 @@ for os_key in gen.OS_CHOICES:
 
 
 
-print()
-if failures:
-    print(f"{len(failures)} check(s) failed:\n")
-    for f in failures:
-        print("  - " + f)
-    sys.exit(1)
-print("All checks passed.")
-
 
 print("\nEP01b, Malaria Tested: a line no diagnosis can ever produce")
 # It has stood empty at Jinja for five years while EP01c beside it was filled -
@@ -507,8 +502,16 @@ print("\nEP01b, Malaria Tested: a line no diagnosis can ever produce")
 # positivity has been between 27 and 82 per cent instead of a credible figure.
 strata = gen.opd_strata_sql(date(2026, 8, 1), date(2026, 9, 1))
 check("the extract emits it", gen.DIRECT_PREFIX + "EP01b" in strata, True)
+# Every marked row names a real 105:01 line. This used to read "exactly one
+# marked row", which stopped being true when the malaria chain and then the
+# emergency section were added; because it sat below the summary it failed in
+# plain sight for two months without ever failing the run. The summary now
+# closes the file again, and the check asks the question that matters.
+_marked = sorted(set(re.findall(r"'" + re.escape(gen.DIRECT_PREFIX) + r"([A-Z]{2}\d{2}[a-z]?)'", strata)))
+# ES01, ES08 and ES09 take their letter from the case's category in SQL;
+# scripts/test_emergency.py holds every completed code to a real element.
 check("...marked as an HMIS code, not an ICD-11 stem",
-      strata.count(gen.DIRECT_PREFIX), 1)
+      _marked, ["EP01b", "EP01c", "EP01d", "EP01e", "ES01", "ES07a", "ES07b", "ES08", "ES09"])
 check("...from the laboratory requests", "dbo.LabRequestDetails" in strata, True)
 check("...joined to the visit, so it bands by age and sex like everything else",
       "q.VisitNo = s.VisitNo" in strata, True)
@@ -555,3 +558,12 @@ check("confirmed means tested, since results are not reliably recorded",
       "mal.tested = 1" in strata, True)
 check("and the total is every case, tested or not",
       strata.count("FROM    mal\nGROUP BY"), 1)
+
+
+print()
+if failures:
+    print(f"{len(failures)} check(s) failed:\n")
+    for f in failures:
+        print("  - " + f)
+    sys.exit(1)
+print("All checks passed.")

@@ -22,6 +22,7 @@ Linux get Python, which those platforms almost always have.
 import re
 from datetime import date
 
+from . import emergency
 from .periods import bounds, describe
 
 # Age bands, in the order the script must test them. Kept here so the generated
@@ -292,7 +293,7 @@ def opd_sql(start: date, end_exclusive: date) -> str:
             CASE WHEN v.seq_in_period = 1 THEN 'New' ELSE 'Re' END  AS visit_category
     FROM    v
     JOIN    {DATABASE}.dbo.Patients p ON p.PatientNo = v.PatientNo
-)
+), {emergency.ctes(DATABASE, start, end_exclusive)}
 SELECT  b.age_years, b.sex, b.visit_category,
         '(attendance)'  AS diagnosis,
         COUNT(*)        AS n
@@ -310,7 +311,14 @@ JOIN    {DATABASE}.dbo.Diagnosis d
     AND d.ObjectName  = 'Visits'
     AND d.VisitType   = 'Out Patient'
 WHERE   d.DiseaseCode IS NOT NULL
-GROUP BY b.age_years, b.sex, b.visit_category, d.DiseaseCode"""
+GROUP BY b.age_years, b.sex, b.visit_category, d.DiseaseCode
+
+UNION ALL
+
+/* HMIS 105:01 section 1.3.25, Emergency Medical Services - ES01, ES07, ES08
+   and ES09 - one case per casualty visit. The rules, and what they cannot see,
+   are set out in api/_lib/emergency.py. */
+{emergency.raw_select(DIRECT_PREFIX)}"""
 
 
 def _band_case(col: str) -> str:
@@ -389,7 +397,7 @@ def opd_strata_sql(start: date, end_exclusive: date) -> str:
         AND d.ObjectName  = 'Visits'
         AND d.VisitType   = 'Out Patient'
     WHERE   d.DiseaseCode IN ({MALARIA_DIAGNOSES})
-)
+), {emergency.ctes(DATABASE, start, end_exclusive)}
 SELECT  '{ATTENDANCE_SENTINEL}' AS diagnosis, s.band, s.sex, s.visit, COUNT(*) AS n
 FROM    s
 GROUP BY s.band, s.sex, s.visit
@@ -468,7 +476,21 @@ FROM    s
 JOIN    {DATABASE}.dbo.LabRequests q ON q.VisitNo = s.VisitNo
 JOIN    {DATABASE}.dbo.LabRequestDetails t ON t.SpecimenNo = q.SpecimenNo
 WHERE   t.TestCode IN ({MALARIA_TESTS})
-GROUP BY s.band, s.sex, s.visit"""
+GROUP BY s.band, s.sex, s.visit
+
+UNION ALL
+
+/* HMIS 105:01 section 1.3.25, Emergency Medical Services: ES01 cases by
+   category, ES07 external haemorrhage, ES08 road traffic injuries by road user
+   and ES09 deaths at the unit. Not diagnoses - one case per casualty visit,
+   classified from the visit, its codes, its beds and what was written about
+   it, because ClinicMaster's own emergency forms are unused at Jinja. Every
+   rule, and what it cannot see, is in api/_lib/emergency.py.
+
+   Casualty visits are counted here whether or not they became admissions: the
+   section counts what the emergency unit saw, which is a different question
+   from the outpatient attendance above. */
+{emergency.strata_select(DIRECT_PREFIX, _band_case, sexes)}"""
 
 
 def profile_sql() -> str:
