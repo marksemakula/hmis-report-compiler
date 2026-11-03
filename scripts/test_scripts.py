@@ -104,8 +104,12 @@ for word in ("INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "TRUNCATE", "EXEC"):
 check("groups rather than listing rows", "GROUP BY" in sql, True)
 check("new vs re is decided by first visit in the period, per the Ministry rule",
       "ROW_NUMBER() OVER (PARTITION BY vv.PatientNo" in sql, True)
+# OR01, Referrals to unit, reads the visit category (10R) in a CTE of its own
+# since November 2026; what must never happen again is the category deciding
+# new versus re-attendance, so the check covers everything outside that CTE.
+_ori = sql[sql.index("ori AS ("):sql.index("), ore AS (")]
 check("the visit category no longer decides attendance",
-      "VisitCategoryID" in sql, False)
+      "VisitCategoryID" in sql.replace(_ori, ""), False)
 # What matters is the shape of what comes BACK, not which columns the
 # computation reads. BirthDate is read to derive an age; it is never returned.
 # The query opens with a CTE, so the OUTER select is the one that matters.
@@ -196,11 +200,12 @@ check("over the distinct communities of the period",
 # A visit with no community is kept: absence of a ward name is not evidence of
 # a ward, and dropping the unclassifiable loses attendances silently.
 check("a visit with no community is kept", "ISNULL(comm.name, '')" in sql, True)
-# Three grains since November 2026: visits, conditions, and the emergency
-# section's casualty cases. Counted in the outer query only - the emergency
-# CTEs carry UNION ALLs of their own, gathering codes from three tables.
-check("three grains: attendance, condition and emergency-section rows",
-      sql[sql.index("\nSELECT  b.age_years"):].count("UNION ALL"), 2)
+# Four grains since November 2026: visits, conditions, the emergency
+# section's casualty cases, and referrals to and from the OPD (one branch for
+# OR01 and OR02). Counted in the outer query only - the emergency and referral
+# CTEs carry UNION ALLs of their own, gathering codes and notes.
+check("four grains: attendance, condition, emergency-section and referral rows",
+      sql[sql.index("\nSELECT  b.age_years"):].count("UNION ALL"), 3)
 check("attendance sentinel present", "'(attendance)'" in sql, True)
 
 print("\nRefusals")
@@ -511,7 +516,8 @@ _marked = sorted(set(re.findall(r"'" + re.escape(gen.DIRECT_PREFIX) + r"([A-Z]{2
 # ES01, ES08 and ES09 take their letter from the case's category in SQL;
 # scripts/test_emergency.py holds every completed code to a real element.
 check("...marked as an HMIS code, not an ICD-11 stem",
-      _marked, ["EP01b", "EP01c", "EP01d", "EP01e", "ES01", "ES07a", "ES07b", "ES08", "ES09"])
+      _marked, ["EP01b", "EP01c", "EP01d", "EP01e", "ES01", "ES07a", "ES07b", "ES08", "ES09",
+                "OR01", "OR02"])
 check("...from the laboratory requests", "dbo.LabRequestDetails" in strata, True)
 check("...joined to the visit, so it bands by age and sex like everything else",
       "q.VisitNo = s.VisitNo" in strata, True)

@@ -22,7 +22,7 @@ Linux get Python, which those platforms almost always have.
 import re
 from datetime import date
 
-from . import emergency
+from . import emergency, referrals
 from .periods import bounds, describe
 
 # Age bands, in the order the script must test them. Kept here so the generated
@@ -293,7 +293,8 @@ def opd_sql(start: date, end_exclusive: date) -> str:
             CASE WHEN v.seq_in_period = 1 THEN 'New' ELSE 'Re' END  AS visit_category
     FROM    v
     JOIN    {DATABASE}.dbo.Patients p ON p.PatientNo = v.PatientNo
-), {emergency.ctes(DATABASE, start, end_exclusive)}
+), {emergency.ctes(DATABASE, start, end_exclusive)},
+{referrals.ctes(DATABASE, start, end_exclusive, "b")}
 SELECT  b.age_years, b.sex, b.visit_category,
         '(attendance)'  AS diagnosis,
         COUNT(*)        AS n
@@ -318,7 +319,13 @@ UNION ALL
 /* HMIS 105:01 section 1.3.25, Emergency Medical Services - ES01, ES07, ES08
    and ES09 - one case per casualty visit. The rules, and what they cannot see,
    are set out in api/_lib/emergency.py. */
-{emergency.raw_select(DIRECT_PREFIX)}"""
+{emergency.raw_select(DIRECT_PREFIX)}
+
+UNION ALL
+
+/* HMIS 105:01 OR01 and OR02, referrals to and from the OPD - one per
+   attendance. The rules are set out in api/_lib/referrals.py. */
+{referrals.raw_select(DIRECT_PREFIX)}"""
 
 
 def _band_case(col: str) -> str:
@@ -397,7 +404,8 @@ def opd_strata_sql(start: date, end_exclusive: date) -> str:
         AND d.ObjectName  = 'Visits'
         AND d.VisitType   = 'Out Patient'
     WHERE   d.DiseaseCode IN ({MALARIA_DIAGNOSES})
-), {emergency.ctes(DATABASE, start, end_exclusive)}
+), {emergency.ctes(DATABASE, start, end_exclusive)},
+{referrals.ctes(DATABASE, start, end_exclusive, "s")}
 SELECT  '{ATTENDANCE_SENTINEL}' AS diagnosis, s.band, s.sex, s.visit, COUNT(*) AS n
 FROM    s
 GROUP BY s.band, s.sex, s.visit
@@ -490,7 +498,18 @@ UNION ALL
    Casualty visits are counted here whether or not they became admissions: the
    section counts what the emergency unit saw, which is a different question
    from the outpatient attendance above. */
-{emergency.strata_select(DIRECT_PREFIX, _band_case, sexes)}"""
+{emergency.strata_select(DIRECT_PREFIX, _band_case, sexes)}
+
+UNION ALL
+
+/* HMIS 105:01 OR01 and OR02: referrals to the OPD (visits registered as a
+   referral, category 10R, unless the referrer is SELF) and from it (an
+   external referral form, or notes that refer the client to a named facility
+   outside JRRH). One per attendance, over the same visits as OA01 and OA02, so
+   they band with the attendance. Not diagnoses, so no translation could
+   produce them, and both stood empty from April 2026. The rules, and what
+   they cannot see, are in api/_lib/referrals.py. */
+{referrals.strata_select(DIRECT_PREFIX)}"""
 
 
 def profile_sql() -> str:
