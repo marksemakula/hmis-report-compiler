@@ -25,9 +25,10 @@ WHAT CLINICMASTER HOLDS (profiled read-only on 3 November 2026, OPD attendances)
     filled on every 10R visit and on no other, so the category and the field
     are one signal, not two. A few 10R visits name the referrer as SELF.
   * 10R visits numbered 19, 40, 29, 35, 33, 20, 51, 38, 38 and 59 in January to
-    October 2026. The 180 to 206 reported for January to March therefore came
-    from the paper register, not from this field; registration records roughly
-    one referral in six.
+    October 2026. The 180 to 206 reported in eHMIS for January to March cannot
+    have come from this field, which held 88 visits against 568 reported; what
+    those figures were compiled from is not recorded here, and nobody supplied
+    a paper count for this work.
   * ExternalReferrals, the referral-out form, held at most four forms a month
     in 2026, almost all for casualty patients who were then admitted; only
     three belonged to an OPD attendance, and none from June to October.
@@ -57,13 +58,15 @@ OR02.   An OPD attendance with an external referral form against it, or whose
 
 WHAT THIS CANNOT SEE
 
-OR01 counts only what registration recorded, which has been about a sixth of
-the register's figure; it is a floor, and the fix is at the registration desk
+OR01 counts only what registration recorded, which for January to March was
+about a sixth of the figure reported; it is a floor, and the fix is at the
+registration desk
 (the "Refferal" category with the referring unit named). OR02 reads only the
 first time each phrase occurs in each note, and misses an outside destination
 the list does not name or a note nobody wrote; it can also count a past
 referral the clinician mentions in passing. Both lines should be read
-against the OPD register's referral columns while the two disagree.
+against the source the earlier reported figures were compiled from, once
+records staff confirm what that was.
 """
 from .emergency import like_any
 

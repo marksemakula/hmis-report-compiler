@@ -134,7 +134,21 @@ check("the surgical wards are the surgical and orthopaedic wards only",
 print("\nBleeding: negations removed before looking")
 check("'no bleeding' is struck out first",
       strata.index("'NO BLEEDING', ' '") < strata.index("AS tb"), True)
-check("and the external-bleeding test reads the cleaned text", "x.tb LIKE '%LACERAT%'" in strata, True)
+check("and the external-bleeding test reads the cleaned text", "nb.tb LIKE '%LACERAT%'" in strata, True)
+
+print("\nNotes are read one at a time, as ordinary text")
+# One large-object string per record, tested by 170-odd patterns, took October
+# 2026 7 min 48 s in Azure Data Studio. A pattern present in the record is
+# present in one of its notes, so reading note by note changes no count.
+check("no note is read as a large object", "nvarchar(max)" in em.ctes(gen.DATABASE, date(2026, 10, 1), date(2026, 11, 1)), False)
+check("fourteen notes per episode, each cut to ordinary text",
+      len(re.findall(r"\(CAST\((?:cf|tr|ad|rd|ex)\.\w+ AS nvarchar\(%d\)\)\)" % em.NOTE_CHARS, strata)), 14)
+check("each pattern family is tested on the notes, once each",
+      [f for f in ("t_rti", "t_veh", "t_vev", "t_obs", "t_surg", "t_ped", "t_onv", "t_bic", "t_moto",
+                   "t_mv", "t_bleed", "t_ctrl") if f"AS {f}," not in strata and f"AS {f}\n" not in strata], [])
+check("RTI from the text is either an RTI word, or a vehicle word with an event word",
+      "OR t.t_rti = 1 OR (t.t_veh = 1 AND t.t_vev = 1)" in strata, True)
+check("a pedestrian only when no note puts them on a vehicle", "x.t_ped = 1 AND x.t_onv = 0" in strata, True)
 check("nose, gut and vaginal bleeding are not external haemorrhage",
       [t for t in em.EXTERNAL_BLEED_TERMS if re.search(r"NOSE|EPISTAX|GI |VAGIN|PV ", t)], [])
 
@@ -149,6 +163,11 @@ check("no patient number, name or date of birth comes back",
       re.search(r"PatientNo|FullName|BirthDate", es_branch[:es_branch.index("FROM")]) is not None, False)
 check("casualty is the same department the attendance rule names",
       em.EMERGENCY_COMMUNITIES, gen.ENTRY_POINT_COMMUNITIES)
+check("and its visits are found by that department's community code",
+      "vv.CommunityID IN ('507BUV')" in strata and em.EMERGENCY_COMMUNITY_CODES == ("507BUV",), True)
+check("each emergency CTE is computed once, not per casualty visit",
+      [c for c in ("ae", "eadm", "edxf", "erd", "eflag")
+       if f"{c} AS (\n" not in strata or em.ONCE not in strata[strata.index(f"{c} AS (\n"):strata.index(f"{c} AS (\n") + 400]], [])
 check("every pattern is free of quotes",
       [t for t in (em.RTI_TERMS + em.VEHICLE_TERMS + em.OBS_TERMS + em.SURGICAL_TERMS
                    + em.EXTERNAL_BLEED_TERMS + em.CONTROLLED_TERMS + em.NOT_BLEEDING) if "'" in t], [])

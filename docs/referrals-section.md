@@ -49,9 +49,12 @@ counts. eHMIS figures are the values Jinja reported, read the same day.
 
 Three findings follow.
 
-1. **Registration records about one referral in six.** The 180 to 206 reported
-   for January to March came from the paper register; ClinicMaster's referral
-   category held 88 visits across the same three months against 568 reported.
+1. **ClinicMaster holds about one referral in six of those reported.** For
+   January to March, ClinicMaster's referral category held 88 visits across the
+   same three months against 568 reported in eHMIS. The reported figures cannot
+   have come from that field. What they were compiled from is not recorded, and
+   no paper count was supplied for this work; records staff can confirm the
+   source.
    `Visits.ReferredBy` is filled on every 10R visit and on no other, so the
    category and the field are a single signal.
 2. **The referral-out form is barely used.** ExternalReferrals held at most four
@@ -73,15 +76,15 @@ equals the 56 October 10R visits with a named referrer found by the profile.
 
 ## What the figures cannot see
 
-* OR01 counts only what registration recorded. While the referral category is
-  used for about a sixth of referred clients, OR01 is a floor. The remedy is at
+* OR01 counts only what registration recorded. While registration records far
+  fewer referrals than were reported early in 2026, OR01 is a floor. The remedy is at
   the registration desk: register every referred client under the "Refferal"
   category and type the referring unit.
 * OR02 reads the first occurrence of each phrase in each note. It misses an
   outside destination the list does not name, and a referral nobody wrote down;
   it can also count a past referral mentioned in passing.
-* Both lines should be read against the OPD register's referral columns while
-  the two sources disagree.
+* Both lines should be read against whatever source the earlier reported
+  figures were compiled from, once records staff confirm what that was.
 
 ## Checking it again
 

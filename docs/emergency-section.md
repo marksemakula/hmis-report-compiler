@@ -35,14 +35,18 @@ Lines unaffected by the November corrections, and ES09 under the corrected rule:
 | September 2026 | 1,050 | 17 | 132 | 42 | 9 | 13 / 34 / 3 / 24 / 58 | 12 | 1 |
 | October 2026 | 1,261 | 12 | 153 | 49 | 12 | 14 / 29 / 3 / 34 / 73 | 5 | 0 |
 
-The paper returns for comparison: June 781 cases, ES07 55 and 51, ES09 23; July 866 cases, ES07 51 and 47, ES09 27.
+The figures reported in eHMIS, for comparison: June 781 cases, ES07 55 and 51, ES09 23; July 866 cases, ES07 51 and 47, ES09 27.
 
 Surgical and medical cases were 225 and 666 in June, 277 and 694 in July, 254 and 709 in August, 445 and 456 in September, and 344 and 752 in October under the first rule. Dropping eye-ward beds as a surgical signal moves at most 3, 129 and 15 cases from surgical to medical in August, September and October; the exact split is set when October is next run against the database.
 
 ## What the extract cannot see
 
-- **ES09 is a minimum.** June and July were reported on paper at 23 and 27 deaths at the unit. The EMR holds 7 and 4 deaths of casualty clients within a week of arrival in those months. The paper register should be preferred while the two disagree. A death within a day of arrival on a ward the client had already reached is counted, and so is a registered brought-in-dead; neither can be told apart in the EMR.
+- **ES09 is a minimum.** June and July were reported in eHMIS at 23 and 27 deaths at the unit. The EMR holds 7 and 4 deaths of casualty clients within a week of arrival in those months. The source those reported figures were compiled from should be preferred while the two disagree. A death within a day of arrival on a ward the client had already reached is counted, and so is a registered brought-in-dead; neither can be told apart in the EMR.
 - **ES07b is a floor.** Bleeding that was controlled and not written down cannot be seen.
-- **ES01 is higher than the paper count** (about 1,050 to 1,260 cases a month against 781 and 866 on paper), because the EMR counts every casualty visit, including clients seen and sent on.
+- **ES01 is higher than the reported count** (about 1,050 to 1,260 cases a month against 781 and 866 reported), because the EMR counts every casualty visit, including clients seen and sent on.
 
 The single change that would improve all four lines is using ClinicMaster's own emergency registration and exit forms at casualty. The arrival mode, mechanism of injury, bleeding control and outcome would then be recorded as fields, not inferred from notes.
+
+## Run time
+
+The first version of these rules took 7 min 48 s for October 2026 on its own, and the whole October script about 8 minutes, long enough that Azure Data Studio refused to save results that had not yet finished. On 3 November 2026 the rules were rewritten to find casualty visits by their community code (507BUV), to compute each step once, and to read the notes one at a time as ordinary text. The October emergency figures came out identical, all 72 groups and 1,261 cases, and the whole script now runs in about 34 seconds.

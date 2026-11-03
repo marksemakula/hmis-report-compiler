@@ -17,7 +17,7 @@ all by the OPD age bands and sex. ES01b carries boxes for women of 10-19 and 20+
 only, and ES09b for 10-19 and 20+; nothing is written to a box the form does
 not draw.
 
-Jinja last filled the section by hand for June and July 2026 (ES01 781 and 866;
+Jinja last reported the section in eHMIS for June and July 2026 (ES01 781 and 866;
 ES07 55/51 and 51/47; ES09 23 and 27). From August, when the compiler took over
 the 105:01, it has been empty, because no line of it is a diagnosis and the
 extract only ever translated diagnoses.
@@ -43,8 +43,8 @@ What is filled is the visit, its free text and what happened to it:
     and never relied on alone;
   * casualty books its admissions in the EMR, but where the bed is booked says
     little about where the client is: until August most were booked onto
-    casualty's own ward, 40440 "ACCIDENTS & EMERGENCY", and many stayed there on
-    paper for days; from September most were booked straight onto destination
+    casualty's own ward, 40440 "ACCIDENTS & EMERGENCY", and many were nominally
+    kept there for days; from September most were booked straight onto destination
     wards, including the eye wards (146 in September) and the TB ward (257 in
     October), which were plainly holding general admissions;
   * WardTransfer is no record of leaving casualty: its first row for an
@@ -104,10 +104,10 @@ ES09.       A death at the unit, read as a death within a day of arriving at
 WHAT THIS CANNOT SEE
 
 Deaths are the weak line. ClinicMaster's death recording is thin - June and
-July were reported on paper at 23 and 27 deaths at the unit, while the EMR
+July were reported in eHMIS at 23 and 27 deaths at the unit, while the EMR
 holds 7 and 4 deaths of casualty clients within a WEEK of arrival - so ES09
-from this extract is a minimum, and the paper register should be preferred
-while the two disagree. The same is true, less severely, of ES07b. A death
+from this extract is a minimum, and the source those reported figures were
+compiled from should be preferred while the two disagree. The same is true, less severely, of ES07b. A death
 within a day of arrival on a ward the client had already reached is counted,
 and a client brought in dead whose death was registered is counted; neither
 can be told apart in the EMR.
@@ -117,6 +117,13 @@ can be told apart in the EMR.
 # extract_scripts.ENTRY_POINT_COMMUNITIES, which names the same department for
 # the attendance rule; scripts/test_emergency.py holds the two together.
 EMERGENCY_COMMUNITIES = ("ACCIDENT AND EMERGENCY",)
+# ...and the community code that name resolves to. Casualty's visits are found
+# by the code: matched through the lookup function, the server could not tell
+# how many there were, assumed a handful, and recomputed the casualty list for
+# every casualty visit. 507BUV is the only code GetLookupDataDes resolves to
+# ACCIDENT AND EMERGENCY among 2026's visits (10,634 to October, read 3 November
+# 2026); scripts/test_emergency.py holds the name and the code together.
+EMERGENCY_COMMUNITY_CODES = ("507BUV",)
 
 # Casualty's own beds. Rooms.WardsID for ward "ACCIDENTS & EMERGENCY". Not used
 # for any line - see "Where the facts actually are" - and kept for the profile
@@ -221,38 +228,69 @@ def _in(values) -> str:
     return ", ".join(f"'{v}'" for v in values)
 
 
-def _clean(expr: str) -> str:
-    """Upper-case free text with line breaks and tabs flattened, so a pattern
-    never fails on a line break and the TSV a grid is copied into never tears."""
-    return (f"UPPER(REPLACE(REPLACE(REPLACE(ISNULL(CAST({expr} AS nvarchar(max)), ''), "
-            f"CHAR(13), ' '), CHAR(10), ' '), CHAR(9), ' '))")
+# The notes read for each casualty episode, one row each: the clinician's six
+# free-text fields, the triage notes, the admission note, the first ward round's
+# four fields and the examination. Each is cut to NOTE_CHARS as ordinary text.
+# Joined into one large-object string, as the first version did, every one of
+# the 170-odd patterns below re-read the whole record, and October 2026 took
+# 7 minutes 48 seconds; read note by note, a LIKE over a whole record is simply
+# a LIKE over any of its notes, so the rules are unchanged.
+NOTE_CHARS = 4000
+
+# The notes are upper-cased before any pattern is tried, so the patterns are
+# compared code point by code point: under the server's case-insensitive
+# collation every LIKE '%...%' re-folds case across the whole note, and with
+# 170-odd patterns over some 17,000 notes a month that is most of the run.
+BINARY = "Latin1_General_BIN2"
+
+# Each emergency CTE is computed once and then joined. Without this the
+# optimiser pushed the visit number into them and recomputed casualty's visit
+# list - two scans of Visits - for every casualty visit: 234 scans for three
+# days, about 2,600 for a month, and nearly all of the 7 min 48 s October took.
+# A TOP cannot be pushed through, so the cap (larger than any table here) keeps
+# every row and stops the correlation.
+ONCE = "TOP (2147483647)"
+
+
+def _note(expr: str) -> str:
+    return f"(CAST({expr} AS nvarchar({NOTE_CHARS})))"
 
 
 def ctes(db: str, start, end_exclusive) -> str:
-    """The emergency CTEs, to follow an existing `comm` CTE in the same WITH.
+    """The emergency CTEs, to follow the attendance CTEs in the same WITH.
 
-    `comm` resolves each community the period used to its name once, as the
-    attendance query already does. Every CTE here is referenced exactly once
-    downstream, so SQL Server builds each a single time; the first draft
-    referenced its classification from five UNION branches and ran for minutes.
+    Casualty's visits are found by community code (EMERGENCY_COMMUNITY_CODES),
+    each CTE is computed once (ONCE) and the notes are read one at a time as
+    ordinary text compared code point by code point (NOTE_CHARS, BINARY):
+    together those took October 2026 from 7 min 48 s to well under a minute
+    with the same counts. The first draft referenced its classification from
+    five UNION branches and ran for minutes, so the classification is read by
+    one branch only.
 
     Produces `ecls`: one row per A&E visit with VisitNo, PatientNo, VisitDate,
     BirthDate, GenderID and the flags cat ('a' medical, 'b' obs/gyn,
     'c' surgical, 'd' RTI), mode ('a'-'e', RTI only), haem, ctrl, died."""
     s, e = start.isoformat(), end_exclusive.isoformat()
-    names = _in(EMERGENCY_COMMUNITIES)
-    t = "x.t"
-    tb = "x.tb"
+    codes = _in(EMERGENCY_COMMUNITY_CODES)
+    notes = ",\n                        ".join(
+        [_note(f"cf.{c}") for c in ("PresentingComplaint", "ProvisionalDiagnosis", "ClinicalNotes",
+                                    "TreatmentPlan", "MuscularSkeletal", "Skin")]
+        + [_note("tr.Notes"), _note("ad.AdmissionNotes")]
+        + [_note(f"rd.{c}") for c in ("History", "ClinicalDiagnosis", "ClinicalNotes", "TreatmentPlan")]
+        + [_note(f"ex.{c}") for c in ("PresentingSignsAndSymptoms", "Diagnosis")])
+
+    def flag(terms, col="n.t"):
+        return f"MAX(CASE WHEN {like_any(col, terms)} THEN 1 ELSE 0 END)"
+
     return f"""ae AS (
-    SELECT  vv.VisitNo, vv.PatientNo, vv.VisitDate, vv.DoctorSpecialtyID
+    SELECT  {ONCE} vv.VisitNo, vv.PatientNo, vv.VisitDate, vv.DoctorSpecialtyID
     FROM    {db}.dbo.Visits vv
-    JOIN    comm ON comm.CommunityID = vv.CommunityID
     WHERE   vv.VisitDate >= '{s}'
       AND   vv.VisitDate <  '{e}'
-      AND   LTRIM(RTRIM(ISNULL(comm.name, ''))) IN ({names})
+      AND   vv.CommunityID IN ({codes})
 ), eadm AS (
     /* The admission this casualty visit became, if any, and where its bed was. */
-    SELECT  a.VisitNo, a.AdmissionNo, r.WardsID,
+    SELECT  {ONCE} a.VisitNo, a.AdmissionNo, r.WardsID,
             ROW_NUMBER() OVER (PARTITION BY a.VisitNo ORDER BY a.AdmissionDateTime, a.AdmissionNo) AS k
     FROM    {db}.dbo.Admissions a
     JOIN    ae ON ae.VisitNo = a.VisitNo
@@ -273,7 +311,7 @@ def ctes(db: str, start, end_exclusive) -> str:
     JOIN    {db}.dbo.Diagnosis d ON d.TreatmentNo = rd.RoundNo AND d.ObjectName = 'IPDDoctor'
     WHERE   m.k = 1
 ), edxf AS (
-    SELECT  VisitNo,
+    SELECT  {ONCE} VisitNo,
             MAX(CASE WHEN DiseaseCode LIKE 'PA0%' OR DiseaseCode LIKE 'PD5%' OR DiseaseCode LIKE 'PF6%'
                      THEN 1 ELSE 0 END) AS dx_rti,
             MAX(CASE WHEN DiseaseCode LIKE 'J%' OR DiseaseCode LIKE 'GA%' THEN 1 ELSE 0 END) AS dx_obs,
@@ -283,31 +321,58 @@ def ctes(db: str, start, end_exclusive) -> str:
     /* The first ward round of each admission, gathered in one join rather than
        looked up per visit: IPDDoctor is not indexed on AdmissionNo, and the
        per-visit lookup made a five-month run take four minutes. */
-    SELECT  rd.AdmissionNo,
-            CONCAT(ic.History, ' | ', ic.ClinicalDiagnosis, ' | ', ic.ClinicalNotes, ' | ', ic.TreatmentPlan) AS t,
+    SELECT  {ONCE} rd.AdmissionNo, ic.History, ic.ClinicalDiagnosis, ic.ClinicalNotes, ic.TreatmentPlan,
             ROW_NUMBER() OVER (PARTITION BY rd.AdmissionNo ORDER BY rd.RoundDateTime, rd.RoundNo) AS k
     FROM    eadm m
     JOIN    {db}.dbo.IPDDoctor rd ON rd.AdmissionNo = m.AdmissionNo
     JOIN    {db}.dbo.IPDClinicalFindings ic ON ic.RoundNo = rd.RoundNo
     WHERE   m.k = 1
-), etxt AS (
-    /* Everything written about the casualty episode, as one upper-case string. */
-    SELECT  ae.VisitNo, ae.PatientNo, ae.VisitDate, ae.DoctorSpecialtyID,
-            m.AdmissionNo, m.WardsID,
-            ' ' + {_clean("CONCAT(cf.t, ' | ', tr.t, ' | ', ad.t, ' | ', rd.t, ' | ', ex.t)")} + ' ' AS t
+), enote AS (
+    /* Everything written about the casualty episode, one row per note, as
+       ordinary upper-case text padded with a space at each end. */
+    SELECT  ae.VisitNo,
+            (' ' + UPPER(REPLACE(REPLACE(REPLACE(f.t, CHAR(13), ' '), CHAR(10), ' '), CHAR(9), ' ')) + ' ')
+                COLLATE {BINARY} AS t
     FROM    ae
     LEFT JOIN eadm m ON m.VisitNo = ae.VisitNo AND m.k = 1
-    OUTER APPLY (SELECT TOP 1 CONCAT(c.PresentingComplaint, ' | ', c.ProvisionalDiagnosis, ' | ',
-                                     c.ClinicalNotes, ' | ', c.TreatmentPlan, ' | ', c.MuscularSkeletal,
-                                     ' | ', c.Skin) AS t
+    OUTER APPLY (SELECT TOP 1 c.PresentingComplaint, c.ProvisionalDiagnosis, c.ClinicalNotes,
+                              c.TreatmentPlan, c.MuscularSkeletal, c.Skin
                  FROM {db}.dbo.ClinicalFindings c WHERE c.VisitNo = ae.VisitNo) cf
-    OUTER APPLY (SELECT TOP 1 tg.Notes AS t
+    OUTER APPLY (SELECT TOP 1 tg.Notes
                  FROM {db}.dbo.Triage tg WHERE tg.TreatmentNo = ae.VisitNo) tr
-    OUTER APPLY (SELECT TOP 1 a.AdmissionNotes AS t
+    OUTER APPLY (SELECT TOP 1 a.AdmissionNotes
                  FROM {db}.dbo.Admissions a WHERE a.AdmissionNo = m.AdmissionNo) ad
     LEFT JOIN erd rd ON rd.AdmissionNo = m.AdmissionNo AND rd.k = 1
-    OUTER APPLY (SELECT TOP 1 CONCAT(ex1.PresentingSignsAndSymptoms, ' | ', ex1.Diagnosis) AS t
+    OUTER APPLY (SELECT TOP 1 ex1.PresentingSignsAndSymptoms, ex1.Diagnosis
                  FROM {db}.dbo.Examinations ex1 WHERE ex1.VisitNo = ae.VisitNo) ex
+    CROSS APPLY (VALUES {notes}) f(t)
+    WHERE   f.t IS NOT NULL
+), eflag AS (
+    /* Each pattern family, once per note, gathered per visit: a family is
+       present in the record when it is present in any of its notes. */
+    SELECT  {ONCE} n.VisitNo,
+            {flag(RTI_TERMS)} AS t_rti,
+            {flag(VEHICLE_TERMS)} AS t_veh,
+            {flag(VEHICLE_EVENT_TERMS)} AS t_vev,
+            {flag(OBS_TERMS)} AS t_obs,
+            {flag(SURGICAL_TERMS)} AS t_surg,
+            {flag(PEDESTRIAN_TERMS)} AS t_ped,
+            {flag(ON_VEHICLE_TERMS)} AS t_onv,
+            {flag(BICYCLE_TERMS)} AS t_bic,
+            {flag(MOTORCYCLE_TERMS)} AS t_moto,
+            {flag(MOTOR_VEHICLE_TERMS)} AS t_mv,
+            {flag(EXTERNAL_BLEED_TERMS, "nb.tb")} AS t_bleed,
+            {flag(CONTROLLED_TERMS)} AS t_ctrl
+    FROM    enote n
+    CROSS APPLY (SELECT {_strip("n.t", NOT_BLEEDING)} AS tb) nb
+    GROUP BY n.VisitNo
+), eitem AS (
+    /* A wound dressing, suturing or debridement billed to the casualty visit,
+       gathered once rather than looked up visit by visit. */
+    SELECT  DISTINCT {ONCE} it.VisitNo
+    FROM    {db}.dbo.Items it
+    JOIN    ae ON ae.VisitNo = it.VisitNo
+    WHERE   {like_any("UPPER(it.ItemName)", CONTROL_ITEM_TERMS)}
 ), ecls AS (
     SELECT  x.VisitNo, p.BirthDate, p.GenderID, x.VisitDate,
             x.rti,
@@ -315,21 +380,18 @@ def ctes(db: str, start, end_exclusive) -> str:
                  WHEN p.GenderID = '15F'
                       AND DATEDIFF(day, p.BirthDate, x.VisitDate) >= 3653
                       AND (x.dx_obs = 1 OR x.DoctorSpecialtyID IN ({_in(GYN_SPECIALTIES)})
-                           OR x.WardsID IN ({_in(GYN_WARDS)}) OR {like_any(t, OBS_TERMS)}) THEN 'b'
+                           OR x.WardsID IN ({_in(GYN_WARDS)}) OR x.t_obs = 1) THEN 'b'
                  WHEN x.dx_surg = 1 OR x.DoctorSpecialtyID IN ({_in(SURGICAL_SPECIALTIES)})
-                      OR x.WardsID IN ({_in(SURGICAL_WARDS)}) OR {like_any(t, SURGICAL_TERMS)} THEN 'c'
+                      OR x.WardsID IN ({_in(SURGICAL_WARDS)}) OR x.t_surg = 1 THEN 'c'
                  ELSE 'a' END AS cat,
             CASE WHEN x.rti = 0 THEN NULL
-                 WHEN {like_any(t, PEDESTRIAN_TERMS)} AND NOT {like_any(t, ON_VEHICLE_TERMS)} THEN 'd'
-                 WHEN {like_any(t, BICYCLE_TERMS)} THEN 'c'
-                 WHEN {like_any(t, MOTORCYCLE_TERMS)} THEN 'b'
-                 WHEN {like_any(t, MOTOR_VEHICLE_TERMS)} THEN 'a'
+                 WHEN x.t_ped = 1 AND x.t_onv = 0 THEN 'd'
+                 WHEN x.t_bic = 1 THEN 'c'
+                 WHEN x.t_moto = 1 THEN 'b'
+                 WHEN x.t_mv = 1 THEN 'a'
                  ELSE 'e' END AS mode,
-            CASE WHEN {like_any(tb, EXTERNAL_BLEED_TERMS)} THEN 1 ELSE 0 END AS haem,
-            CASE WHEN {like_any(t, CONTROLLED_TERMS)}
-                      OR EXISTS (SELECT 1 FROM {db}.dbo.Items it
-                                 WHERE it.VisitNo = x.VisitNo AND {like_any("UPPER(it.ItemName)", CONTROL_ITEM_TERMS)})
-                 THEN 1 ELSE 0 END AS ctrl,
+            x.t_bleed AS haem,
+            CASE WHEN x.t_ctrl = 1 OR x.i_ctrl = 1 THEN 1 ELSE 0 END AS ctrl,
             CASE WHEN EXISTS (SELECT 1 FROM {db}.dbo.Deaths dt
                               WHERE dt.PatientNo = x.PatientNo
                                 AND dt.DeathDate >= CAST(x.VisitDate AS date)
@@ -339,13 +401,22 @@ def ctes(db: str, start, end_exclusive) -> str:
                                    AND ds.DischargeStatusID = '{DECEASED}'
                                    AND ds.DischargeDateTime < DATEADD(day, 2, CAST(x.VisitDate AS date)))
                  THEN 1 ELSE 0 END AS died
-    FROM   (SELECT et.*, ISNULL(f.dx_rti, 0) AS dx_rti, ISNULL(f.dx_obs, 0) AS dx_obs,
-                   ISNULL(f.dx_surg, 0) AS dx_surg,
-                   CASE WHEN f.dx_rti = 1 OR {like_any("et.t", RTI_TERMS)}
-                             OR ({like_any("et.t", VEHICLE_TERMS)} AND {like_any("et.t", VEHICLE_EVENT_TERMS)})
-                        THEN 1 ELSE 0 END AS rti,
-                   {_strip("et.t", NOT_BLEEDING)} AS tb
-            FROM etxt et LEFT JOIN edxf f ON f.VisitNo = et.VisitNo) x
+    FROM   (SELECT  ae.VisitNo, ae.PatientNo, ae.VisitDate, ae.DoctorSpecialtyID,
+                    m.AdmissionNo, m.WardsID,
+                    ISNULL(f.dx_obs, 0) AS dx_obs, ISNULL(f.dx_surg, 0) AS dx_surg,
+                    ISNULL(t.t_obs, 0) AS t_obs, ISNULL(t.t_surg, 0) AS t_surg,
+                    ISNULL(t.t_ped, 0) AS t_ped, ISNULL(t.t_onv, 0) AS t_onv,
+                    ISNULL(t.t_bic, 0) AS t_bic, ISNULL(t.t_moto, 0) AS t_moto,
+                    ISNULL(t.t_mv, 0) AS t_mv, ISNULL(t.t_bleed, 0) AS t_bleed,
+                    ISNULL(t.t_ctrl, 0) AS t_ctrl,
+                    CASE WHEN i.VisitNo IS NULL THEN 0 ELSE 1 END AS i_ctrl,
+                    CASE WHEN f.dx_rti = 1 OR t.t_rti = 1 OR (t.t_veh = 1 AND t.t_vev = 1)
+                         THEN 1 ELSE 0 END AS rti
+            FROM    ae
+            LEFT JOIN eadm m  ON m.VisitNo = ae.VisitNo AND m.k = 1
+            LEFT JOIN edxf f  ON f.VisitNo = ae.VisitNo
+            LEFT JOIN eflag t ON t.VisitNo = ae.VisitNo
+            LEFT JOIN eitem i ON i.VisitNo = ae.VisitNo) x
     JOIN    {db}.dbo.Patients p ON p.PatientNo = x.PatientNo
 )"""
 
